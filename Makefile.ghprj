@@ -1,6 +1,11 @@
 REPO ?= $(shell gh repo view --json nameWithOwner -q .nameWithOwner)
 
-.PHONY: setup-labels
+.PHONY: setup-labels setup-token
+
+setup-token: ## Set AGENT_GH_TOKEN from the current gh auth token for this repository
+	@echo "Setting AGENT_GH_TOKEN in $(REPO)..."
+	@gh auth token | gh secret set AGENT_GH_TOKEN --repo "$(REPO)"
+	@echo "Token setup complete."
 
 setup-labels: ## Create all required labels in the target repository
 	@echo "Setting up labels in $(REPO)..."
