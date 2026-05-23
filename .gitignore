@@ -150,3 +150,7 @@ cython_debug/
 
 # Local goal/evaluation logs
 .goal/
+
+# Agent prompt/results files
+_prompt.txt
+worker-agent-results.txt
