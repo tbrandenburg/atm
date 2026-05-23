@@ -1,0 +1,6 @@
+Step 1: Read issue #51.
+Step 2: Check idempotency — no open PR for this issue.
+No open PRs. Step 3: Branch name — `chore/issue-51`. Let me explore the README first.
+Good. Now let me create the branch and make the change.
+Let me verify the change looks correct.
+The emoji is replaced. Since this is a README content change, there are no unit tests to update. Let me commit and push.
