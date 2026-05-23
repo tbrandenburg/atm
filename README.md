@@ -16,7 +16,7 @@ Force overwrite existing ATM files:
 curl -fsSL https://raw.githubusercontent.com/tbrandenburg/atm/main/Makefile.ghprj | make -f - install-force
 ```
 
-The installer copies the GitHub workflows, OpenCode agents, OpenCode commands, and the bundled agentic workflow skill. It also runs `setup-labels`, which creates or updates the required labels idempotently.
+The installer copies the GitHub workflows, OpenCode agents, OpenCode commands, and the bundled agentic workflow skill. It also sets `AGENT_GH_TOKEN` from the current `gh` authentication token and runs `setup-labels`, which creates or updates the required labels idempotently.
 
 Commit and push the installed files:
 
@@ -25,7 +25,7 @@ git add .github .opencode .atm-version && git commit -m "feat: Add ATM agentic w
 git push
 ```
 
-After installation, configure `AGENT_GH_TOKEN` in repository secrets if needed and enable GitHub Actions workflow write permissions and PR approval permissions.
+Before installation, authenticate `gh` with a token that can create repository secrets and labels. After installation, enable GitHub Actions workflow write permissions and PR approval permissions.
 
 ## How it works
 

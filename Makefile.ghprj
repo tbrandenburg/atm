@@ -73,9 +73,10 @@ help:
 	@echo "Agentic Task Machine (ATM) installer"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make -f Makefile.ghprj install        Install ATM files and labels"
+	@echo "  make -f Makefile.ghprj install        Install ATM files, token secret, and labels"
 	@echo "  make -f Makefile.ghprj install-force  Install and overwrite existing files"
 	@echo "  make -f Makefile.ghprj install-dry    Show what would be installed"
+	@echo "  make -f Makefile.ghprj setup-token    Set AGENT_GH_TOKEN from current gh auth"
 	@echo "  make -f Makefile.ghprj setup-labels   Create or update required labels"
 	@echo "  make -f Makefile.ghprj clean          Remove installed ATM files"
 	@echo ""
@@ -97,11 +98,11 @@ setup-dirs:
 
 install: FORCE = 0
 install: MODE = if missing
-install: setup-dirs install-files setup-labels install-summary
+install: setup-dirs install-files setup-token setup-labels install-summary
 
 install-force: FORCE = 1
 install-force: MODE = forced overwrite
-install-force: setup-dirs install-files setup-labels install-summary
+install-force: setup-dirs install-files setup-token setup-labels install-summary
 
 install-files:
 	@for file_desc in $(ATM_FILES); do \
@@ -142,8 +143,7 @@ install-summary:
 	@echo "Next steps:"
 	@echo "  1. Commit and push the new files:"
 	@echo "     git add .github .opencode .atm-version && git commit -m 'feat: Add ATM agentic workflow'"
-	@echo "  2. Configure AGENT_GH_TOKEN in repository secrets if needed."
-	@echo "  3. Enable GitHub Actions workflow write permissions and PR approval permissions."
+	@echo "  2. Enable GitHub Actions workflow write permissions and PR approval permissions."
 
 install-dry: setup-dirs
 	@echo "DRY RUN: Checking what would be installed..."
@@ -164,9 +164,13 @@ install-dry: setup-dirs
 	@echo "  blocked           d93f0b  Blocked - requires human intervention"
 	@echo "  status/approved   0e8a16  PR reviewed and ready for integrator to merge"
 	@echo ""
+	@echo "DRY RUN: Would set AGENT_GH_TOKEN in $(REPO) from the current gh auth token."
+	@echo ""
 	@echo "To install, run: make -f Makefile.ghprj install"
 
 setup-token: ## Set AGENT_GH_TOKEN from the current gh auth token for this repository
+	@if [ -z "$(REPO)" ]; then echo "REPO is required. Run inside a GitHub repo or pass REPO=owner/name."; exit 1; fi
+	@gh auth status >/dev/null 2>&1 || { echo "gh authentication is required to set AGENT_GH_TOKEN."; exit 1; }
 	@echo "Setting AGENT_GH_TOKEN in $(REPO)..."
 	@gh auth token | gh secret set AGENT_GH_TOKEN --repo "$(REPO)"
 	@echo "Token setup complete."
