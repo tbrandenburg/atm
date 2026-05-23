@@ -1,0 +1,270 @@
+name: agentic-task-machine - Quality Agent
+
+# Fires when a type/task issue is closed.
+# Checks if all type/task sub-issues for the parent type/user issue are closed.
+# If all closed: reviews the solution and either closes parent or creates follow-up tasks.
+
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      parent_issue_number:
+        description: 'Parent type/user issue number to quality-check'
+        required: true
+        type: number
+
+env:
+  GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+
+jobs:
+  prepare:
+    if: |
+      github.event_name == 'issues' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      has_candidates: ${{ steps.filter.outputs.has_candidates }}
+      parent_numbers:  ${{ steps.filter.outputs.parent_numbers }}
+      prompt:          ${{ steps.build.outputs.prompt }}
+      model:           ${{ steps.config.outputs.model }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          mkdir -p ~/.local/bin
+          wget -qO ~/.local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x ~/.local/bin/yq
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Read config
+        id: config
+        run: echo "model=$(yq '.model' .github/config/config.yml)" >> $GITHUB_OUTPUT
+
+      - name: Find parent issues ready for quality review
+        id: filter
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+          PARENTS_TO_CHECK="[]"
+
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            # Check if the closed issue is a type/task
+            LABELS=$(gh issue view ${{ github.event.issue.number }} \
+              --repo "$REPO" --json labels --jq '[.labels[].name]')
+            HAS_TASK=$(echo "$LABELS" | jq 'contains(["type/task"])')
+            if [ "$HAS_TASK" != "true" ]; then
+              echo "has_candidates=false" >> $GITHUB_OUTPUT
+              echo "ℹ️ Closed issue is not a type/task — skipping." >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            # Extract parent issue number from body
+            BODY=$(gh issue view ${{ github.event.issue.number }} \
+              --repo "$REPO" --json body --jq '.body')
+            PARENT_NUM=$(echo "$BODY" | grep -oP '(?<=Parent issue: #)\d+' | head -1)
+            if [ -z "$PARENT_NUM" ]; then
+              echo "has_candidates=false" >> $GITHUB_OUTPUT
+              echo "ℹ️ Closed type/task has no Parent issue reference — skipping." >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            PARENTS_TO_CHECK="[$PARENT_NUM]"
+          else
+            PARENTS_TO_CHECK="[${{ inputs.parent_issue_number }}]"
+          fi
+
+          # For each parent, check if ALL its type/task sub-issues are closed
+          READY_PARENTS="[]"
+          for PARENT in $(echo "$PARENTS_TO_CHECK" | jq -r '.[]'); do
+            # Check parent is still open
+            PARENT_STATE=$(gh issue view "$PARENT" --repo "$REPO" --json state --jq '.state')
+            if [ "$PARENT_STATE" != "OPEN" ]; then
+              continue
+            fi
+
+            # Find all type/task sub-issues for this parent
+            ALL_TASKS=$(gh issue list \
+              --repo "$REPO" \
+              --label "type/task" \
+              --state all \
+              --limit 500 \
+              --json number,state,body \
+              --jq "[.[] | select(.body | test(\"Parent issue: #${PARENT}([^0-9]|$)\"))]")
+
+            TOTAL=$(echo "$ALL_TASKS" | jq length)
+            if [ "$TOTAL" = "0" ]; then
+              continue
+            fi
+
+            OPEN_COUNT=$(echo "$ALL_TASKS" | jq '[.[] | select(.state == "OPEN")] | length')
+            if [ "$OPEN_COUNT" != "0" ]; then
+              echo "ℹ️ Parent #$PARENT has $OPEN_COUNT open type/task sub-issue(s) — waiting." >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+
+            echo "✔ Parent #$PARENT — all $TOTAL type/task sub-issues closed, queued for quality review." >> $GITHUB_STEP_SUMMARY
+            READY_PARENTS=$(echo "$READY_PARENTS" | jq --argjson p "$PARENT" '. + [$p]')
+          done
+
+          COUNT=$(echo "$READY_PARENTS" | jq length)
+          if [ "$COUNT" = "0" ]; then
+            echo "has_candidates=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_candidates=true" >> $GITHUB_OUTPUT
+            echo "parent_numbers=$(echo "$READY_PARENTS" | jq -c .)" >> $GITHUB_OUTPUT
+          fi
+          {
+            echo 'READY_PARENTS<<EOF'
+            echo "$READY_PARENTS"
+            echo 'EOF'
+          } >> $GITHUB_ENV
+
+      - name: Collect quality review context
+        if: steps.filter.outputs.has_candidates == 'true'
+        run: |
+          REPO="${{ github.repository }}"
+          CONTEXT="{}"
+
+          for PARENT in $(echo "$READY_PARENTS" | jq -r '.[]'); do
+            # Parent issue
+            PARENT_DATA=$(gh issue view "$PARENT" \
+              --repo "$REPO" \
+              --json number,title,body,labels,comments)
+
+            # All type/task sub-issues (closed)
+            TASKS=$(gh issue list \
+              --repo "$REPO" \
+              --label "type/task" \
+              --state closed \
+              --limit 500 \
+              --json number,title,body,comments \
+              --jq "[.[] | select(.body | test(\"Parent issue: #${PARENT}([^0-9]|$)\"))]")
+
+            # Merged PRs linked to each task
+            PR_DATA="{}"
+            for TASK_NUM in $(echo "$TASKS" | jq -r '.[].number'); do
+              MERGED=$(gh pr list \
+                --repo "$REPO" \
+                --state merged \
+                --limit 100 \
+                --json number,title,body,mergedAt \
+                --jq "[.[] | select(.body | test(\"[Cc]loses #${TASK_NUM}([^0-9]|$)\"))]")
+              if [ "$(echo "$MERGED" | jq length)" != "0" ]; then
+                PR_NUM=$(echo "$MERGED" | jq -r '.[0].number')
+                DIFF=$(gh pr diff "$PR_NUM" --repo "$REPO" 2>/dev/null | head -200 || echo "(unavailable)")
+                PR_DATA=$(echo "$PR_DATA" | jq \
+                  --argjson tn "$TASK_NUM" \
+                  --argjson merged "$MERGED" \
+                  --arg diff "$DIFF" \
+                  '. + {($tn | tostring): {"prs": $merged, "diff_preview": $diff}}')
+              fi
+            done
+
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --argjson parent "$PARENT" \
+              --argjson parent_data "$PARENT_DATA" \
+              --argjson tasks "$TASKS" \
+              --argjson prs "$PR_DATA" \
+              '. + {($parent | tostring): {"parent_issue": $parent_data, "tasks": $tasks, "pull_requests": $prs}}')
+          done
+
+          {
+            echo 'QUALITY_CONTEXT<<EOF'
+            echo "$CONTEXT"
+            echo 'EOF'
+          } >> $GITHUB_ENV
+
+      - name: Build prompt
+        id: build
+        if: steps.filter.outputs.has_candidates == 'true'
+        run: |
+          echo "prompt=$(echo "$QUALITY_CONTEXT" | jq -Rs .)" >> $GITHUB_OUTPUT
+
+  run:
+    needs: prepare
+    if: needs.prepare.outputs.has_candidates == 'true'
+    uses: ./.github/workflows/core-opencode-run.yml
+    with:
+      run-name:        'quality-agent'
+      command:         'agentic-task-machine-quality-check'
+      prompt:          ${{ needs.prepare.outputs.prompt }}
+      agent:           'quality'
+      model:           ${{ needs.prepare.outputs.model }}
+      runner:          'ubuntu-latest'
+      timeout-minutes: 60
+    permissions:
+      issues:        write
+      pull-requests: read
+      contents:      read
+    secrets: inherit
+
+  verify:
+    needs: [prepare, run]
+    if: needs.prepare.outputs.has_candidates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download task files
+        uses: actions/download-artifact@v4
+        with:
+          name: gh-artifacts-${{ github.run_id }}
+          path: gh-artifacts
+        continue-on-error: true
+
+      - name: Process quality signals and create follow-up tasks
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+          PARENT_NUMBERS='${{ needs.prepare.outputs.parent_numbers }}'
+
+          for PARENT in $(echo "$PARENT_NUMBERS" | jq -r '.[]'); do
+            RESULT_FILE="gh-artifacts/quality-result.md"
+
+            if [ ! -f "$RESULT_FILE" ]; then
+              # No signal file — post warning, retry on next schedule
+              gh issue comment "$PARENT" \
+                --repo "$REPO" \
+                --body "⚠️ Quality agent ran but produced no result file. Use workflow_dispatch to retry."
+              echo "⚠️ #$PARENT — no quality result file, requires manual retry." >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+
+            SIGNAL=$(head -1 "$RESULT_FILE" | sed 's/^signal: //')
+            COMMENT_BODY=$(tail -n +3 "$RESULT_FILE")
+
+            if [ "$SIGNAL" = "QUALITY-PASSED" ]; then
+              gh issue comment "$PARENT" \
+                --repo "$REPO" \
+                --body "$COMMENT_BODY"
+              gh issue close "$PARENT" \
+                --repo "$REPO" \
+                --comment "✅ Quality agent confirmed solution is sufficient. Closing."
+              echo "✅ #$PARENT → closed (quality passed)" >> $GITHUB_STEP_SUMMARY
+            elif [ "$SIGNAL" = "QUALITY-FAILED" ]; then
+              gh issue comment "$PARENT" \
+                --repo "$REPO" \
+                --body "$COMMENT_BODY"
+              CREATED=0
+              shopt -s nullglob
+              for f in gh-artifacts/tasks/${PARENT}-*.md; do
+                TITLE=$(head -1 "$f" | sed 's/^title: //')
+                BODY=$(tail -n +3 "$f")
+                gh issue create \
+                  --repo "$REPO" \
+                  --title "$TITLE" \
+                  --body "$BODY" \
+                  --label "type/task"
+                echo "✅ #$PARENT — created follow-up type/task: $TITLE" >> $GITHUB_STEP_SUMMARY
+                CREATED=$((CREATED + 1))
+              done
+              shopt -u nullglob
+              echo "🔁 #$PARENT — $CREATED follow-up type/task issue(s) created." >> $GITHUB_STEP_SUMMARY
+            else
+              gh issue comment "$PARENT" \
+                --repo "$REPO" \
+                --body "⚠️ Quality agent produced an unrecognised signal: '$SIGNAL'. Use workflow_dispatch to retry."
+              echo "⚠️ #$PARENT — unrecognised signal '$SIGNAL', requires manual retry." >> $GITHUB_STEP_SUMMARY
+            fi
+          done

@@ -1,0 +1,182 @@
+name: agentic-task-machine - Planner Agent (type/user)
+
+# Fires when a new issue is opened by a human (auto-labeled type/user in prepare).
+# Planner breaks the user issue into parallelisable type/task sub-issues.
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to plan'
+        required: true
+        type: number
+
+env:
+  GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+
+jobs:
+  prepare:
+    if: |
+      (github.event_name == 'issues' && github.event.action == 'opened' &&
+       !contains(github.event.issue.labels.*.name, 'type/task')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      has_candidates: ${{ steps.filter.outputs.has_candidates }}
+      issue_number:   ${{ steps.filter.outputs.issue_number }}
+      prompt:         ${{ steps.build.outputs.prompt }}
+      model:          ${{ steps.config.outputs.model }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Debug auth
+        run: |
+          gh auth status || true
+          gh api /rate_limit --include 2>&1 | grep -iE "x-oauth|x-accepted|HTTP/" || true
+          gh api graphql -f query='{ viewer { login } }' || true
+
+      - name: Install yq
+        run: |
+          mkdir -p ~/.local/bin
+          wget -qO ~/.local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x ~/.local/bin/yq
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Read config
+        id: config
+        run: echo "model=$(yq '.model' .github/config/config.yml)" >> $GITHUB_OUTPUT
+
+      - name: Auto-label human-created issue as type/user
+        if: github.event_name == 'issues' && github.event.action == 'opened' && !contains(github.event.issue.labels.*.name, 'type/task')
+        run: |
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --add-label "type/user"
+
+      - name: Find candidates
+        id: filter
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            ISSUE_NUMBER=${{ github.event.issue.number }}
+          else
+            ISSUE_NUMBER=${{ inputs.issue_number }}
+          fi
+
+          # Check if sub-tasks already exist referencing this parent
+          EXISTING=$(gh issue list \
+            --repo "$REPO" \
+            --label "type/task" \
+            --state all \
+            --limit 500 \
+            --json number,body \
+            --jq "[.[] | select(.body | test(\"Parent issue: #${ISSUE_NUMBER}([^0-9]|$)\"))] | length")
+          if [ "$EXISTING" != "0" ]; then
+            echo "has_candidates=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ #$ISSUE_NUMBER already has $EXISTING type/task sub-issue(s) — skipping." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "has_candidates=true"  >> $GITHUB_OUTPUT
+            echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build prompt
+        id: build
+        if: steps.filter.outputs.has_candidates == 'true'
+        run: |
+          ISSUE=$(gh issue view ${{ steps.filter.outputs.issue_number }} \
+            --repo ${{ github.repository }} \
+            --json number,title,body,labels,comments)
+          CONTEXT=$(echo "$ISSUE" | jq -c .)
+          echo "prompt=$(echo "$CONTEXT" | jq -Rs .)" >> $GITHUB_OUTPUT
+
+  run:
+    needs: prepare
+    if: needs.prepare.outputs.has_candidates == 'true'
+    uses: ./.github/workflows/core-opencode-run.yml
+    with:
+      run-name:        'planner-agent'
+      command:         'agentic-task-machine-plan-user-issue'
+      prompt:          ${{ needs.prepare.outputs.prompt }}
+      agent:           'planner'
+      model:           ${{ needs.prepare.outputs.model }}
+      runner:          'ubuntu-latest'
+      timeout-minutes: 60
+    permissions:
+      issues:   write
+      contents: read
+    secrets: inherit
+
+  verify:
+    needs: [prepare, run]
+    if: needs.prepare.outputs.has_candidates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download task files
+        uses: actions/download-artifact@v4
+        with:
+          name: gh-artifacts-${{ github.run_id }}
+          path: gh-artifacts
+        continue-on-error: true
+
+      - name: Create type/task issues from task files
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+
+          # Derive parent issue numbers from task filenames ({parent}-{n}-{slug}.md).
+          # In single-issue mode the prepare step already scoped the agent to one parent,
+          # so all files under gh-artifacts/tasks/ belong to it — but we still read from filenames
+          # to stay consistent and avoid an extra gh API call.
+          shopt -s nullglob
+          ISSUE_NUMBERS=$(for f in gh-artifacts/tasks/*.md; do
+            basename "$f" | cut -d'-' -f1
+          done | sort -un)
+          shopt -u nullglob
+
+          if [ -z "$ISSUE_NUMBERS" ]; then
+            # No task files at all — block the parent if we know it, else just fail
+            PARENT="${{ needs.prepare.outputs.issue_number }}"
+            if [ -n "$PARENT" ]; then
+              gh issue edit "$PARENT" --repo "$REPO" --add-label "blocked"
+              gh issue comment "$PARENT" --repo "$REPO" \
+                --body "❌ Planner agent did not write any task files. Blocked for human review."
+              echo "❌ #$PARENT → blocked (no task files written)" >> $GITHUB_STEP_SUMMARY
+            fi
+            exit 1
+          fi
+
+          FAILED=0
+          for ISSUE in $ISSUE_NUMBERS; do
+            CREATED=0
+            shopt -s nullglob
+            for f in gh-artifacts/tasks/${ISSUE}-*.md; do
+              TITLE=$(head -1 "$f" | sed 's/^title: //')
+              BODY=$(tail -n +3 "$f")
+              gh issue create \
+                --repo "$REPO" \
+                --title "$TITLE" \
+                --body "$BODY" \
+                --label "type/task"
+              echo "✅ #$ISSUE — created type/task: $TITLE" >> $GITHUB_STEP_SUMMARY
+              CREATED=$((CREATED + 1))
+            done
+            shopt -u nullglob
+            if [ "$CREATED" = "0" ]; then
+              gh issue edit "$ISSUE" --repo "$REPO" --add-label "blocked"
+              gh issue comment "$ISSUE" --repo "$REPO" \
+                --body "❌ Planner agent did not create any type/task sub-issues. Blocked for human review."
+              echo "❌ #$ISSUE → blocked (no task files written)" >> $GITHUB_STEP_SUMMARY
+              FAILED=1
+            else
+              echo "✅ #$ISSUE — $CREATED type/task sub-issue(s) created." >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          exit $FAILED

@@ -1,0 +1,13 @@
+{
+  "sourceType": "github",
+  "source": "github",
+  "url": "https://github.com/tbrandenburg/ghaw-sandbox",
+  "repo": "tbrandenburg/ghaw-sandbox",
+  "ref": "main",
+  "subpath": ".github/skills/agentic-workflow-system",
+  "installSource": "https://github.com/tbrandenburg/ghaw-sandbox/tree/main/.github/skills/agentic-workflow-system",
+  "skillName": "agentic-workflow-system",
+  "scope": "legacy",
+  "installedAt": "2026-05-19T11:00:59.921Z",
+  "updatedAt": "2026-05-19T11:00:59.921Z"
+}

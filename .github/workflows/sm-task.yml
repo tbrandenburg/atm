@@ -1,0 +1,153 @@
+name: agentic-task-machine - Worker Agent (type/task)
+
+# Fires when a type/task issue is labeled or when blocked is removed (immediate retry).
+# Worker handles the full task atomically: branch → implement → PR → self-review + approve.
+
+on:
+  issues:
+    types: [labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to work'
+        required: true
+        type: number
+
+env:
+  GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+
+jobs:
+  prepare:
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'type/task') ||
+      (github.event_name == 'issues' && github.event.action == 'unlabeled' && github.event.label.name == 'blocked') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      has_candidates: ${{ steps.filter.outputs.has_candidates }}
+      issue_number:   ${{ steps.filter.outputs.issue_number }}
+      prompt:         ${{ steps.build.outputs.prompt }}
+      model:          ${{ steps.config.outputs.model }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          mkdir -p ~/.local/bin
+          wget -qO ~/.local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x ~/.local/bin/yq
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Read config
+        id: config
+        run: echo "model=$(yq '.model' .github/config/config.yml)" >> $GITHUB_OUTPUT
+
+      - name: Find candidates
+        id: filter
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+
+          check_issue_eligible() {
+            local N=$1
+            # Must be open
+            STATE=$(gh issue view "$N" --repo "$REPO" --json state --jq '.state')
+            [ "$STATE" != "OPEN" ] && echo "false" && return
+            # Must have type/task label
+            HAS_TASK=$(gh issue view "$N" --repo "$REPO" --json labels \
+              --jq '[.labels[].name] | contains(["type/task"])')
+            [ "$HAS_TASK" != "true" ] && echo "false" && return
+            # Must NOT have blocked label
+            HAS_BLOCKED=$(gh issue view "$N" --repo "$REPO" --json labels \
+              --jq '[.labels[].name] | contains(["blocked"])')
+            [ "$HAS_BLOCKED" = "true" ] && echo "false" && return
+            # Must NOT already have a linked open PR
+            LINKED_PRS=$(gh pr list \
+              --repo "$REPO" \
+              --state open \
+              --json number,body \
+              --jq "[.[] | select(.body | test(\"[Cc]loses #${N}([^0-9]|$)\"))] | length")
+            [ "$LINKED_PRS" != "0" ] && echo "false" && return
+            echo "true"
+          }
+
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            ISSUE_NUMBER=${{ github.event.issue.number }}
+          else
+            ISSUE_NUMBER=${{ inputs.issue_number }}
+          fi
+
+          ELIGIBLE=$(check_issue_eligible "$ISSUE_NUMBER")
+          if [ "$ELIGIBLE" = "true" ]; then
+            echo "has_candidates=true"  >> $GITHUB_OUTPUT
+            echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+          else
+            echo "has_candidates=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ #$ISSUE_NUMBER is not eligible (blocked, no type/task, closed, or PR exists)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Build prompt
+        id: build
+        if: steps.filter.outputs.has_candidates == 'true'
+        run: |
+          ISSUE=$(gh issue view ${{ steps.filter.outputs.issue_number }} \
+            --repo ${{ github.repository }} \
+            --json number,title,body,labels,comments)
+          CONTEXT=$(echo "$ISSUE" | jq -c .)
+          echo "prompt=$(echo "$CONTEXT" | jq -Rs .)" >> $GITHUB_OUTPUT
+
+  run:
+    needs: prepare
+    if: needs.prepare.outputs.has_candidates == 'true'
+    uses: ./.github/workflows/core-opencode-run.yml
+    with:
+      run-name:        'worker-agent'
+      command:         'agentic-task-machine-work-task-issue'
+      prompt:          ${{ needs.prepare.outputs.prompt }}
+      agent:           'worker'
+      model:           ${{ needs.prepare.outputs.model }}
+      runner:          'ubuntu-latest'
+      timeout-minutes: 120
+    permissions:
+      issues:        write
+      pull-requests: write
+      contents:      write
+    secrets: inherit
+
+  verify:
+    needs: [prepare, run]
+    if: needs.prepare.outputs.has_candidates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR was created for each candidate
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+
+          ISSUE_NUMBERS="${{ needs.prepare.outputs.issue_number }}"
+
+          FAILED=0
+          for ISSUE in $ISSUE_NUMBERS; do
+            LINKED_PRS=$(gh pr list \
+              --repo "$REPO" \
+              --state open \
+              --json number,body \
+              --jq "[.[] | select(.body | test(\"[Cc]loses #${ISSUE}([^0-9]|$)\"))] | length")
+            if [ "$LINKED_PRS" != "0" ]; then
+              echo "✅ #$ISSUE — linked PR exists." >> $GITHUB_STEP_SUMMARY
+            else
+              gh issue edit "$ISSUE" \
+                --repo "$REPO" \
+                --add-label "blocked"
+              gh issue comment "$ISSUE" \
+                --repo "$REPO" \
+                --body "❌ Worker agent did not create a pull request. Blocked for human review."
+              echo "❌ #$ISSUE → blocked (no PR created)" >> $GITHUB_STEP_SUMMARY
+              FAILED=1
+            fi
+          done
+
+          exit $FAILED

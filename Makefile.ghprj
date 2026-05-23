@@ -1,0 +1,48 @@
+REPO ?= $(shell gh repo view --json nameWithOwner -q .nameWithOwner)
+
+.PHONY: setup-labels
+
+setup-labels: ## Create all required labels in the target repository
+	@echo "Setting up labels in $(REPO)..."
+
+	@gh api -X POST "repos/$(REPO)/labels" \
+		--field name="type/user" \
+		--field color="0075ca" \
+		--field description="User-facing feature request" \
+		2>/dev/null || \
+	gh api -X PATCH "repos/$(REPO)/labels/type%2Fuser" \
+		--field color="0075ca" \
+		--field description="User-facing feature request"
+	@echo "  ✓ type/user"
+
+	@gh api -X POST "repos/$(REPO)/labels" \
+		--field name="type/task" \
+		--field color="e4e669" \
+		--field description="Implementation sub-task" \
+		2>/dev/null || \
+	gh api -X PATCH "repos/$(REPO)/labels/type%2Ftask" \
+		--field color="e4e669" \
+		--field description="Implementation sub-task"
+	@echo "  ✓ type/task"
+
+	@gh api -X POST "repos/$(REPO)/labels" \
+		--field name="blocked" \
+		--field color="d93f0b" \
+		--field description="Blocked — requires human intervention" \
+		2>/dev/null || \
+	gh api -X PATCH "repos/$(REPO)/labels/blocked" \
+		--field color="d93f0b" \
+		--field description="Blocked — requires human intervention"
+	@echo "  ✓ blocked"
+
+	@gh api -X POST "repos/$(REPO)/labels" \
+		--field name="status/approved" \
+		--field color="0e8a16" \
+		--field description="PR reviewed and ready for integrator to merge" \
+		2>/dev/null || \
+	gh api -X PATCH "repos/$(REPO)/labels/status%2Fapproved" \
+		--field color="0e8a16" \
+		--field description="PR reviewed and ready for integrator to merge"
+	@echo "  ✓ status/approved"
+
+	@echo "Labels setup complete."

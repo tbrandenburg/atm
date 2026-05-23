@@ -1,0 +1,147 @@
+name: agentic-task-machine - Integrator Agent
+
+# Fires when the 'status/approved' label is added to a pull request.
+# Integrator ensures CI is green (fixing if failing) then merges to main using a PAT.
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to integrate'
+        required: true
+        type: number
+
+env:
+  GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+
+jobs:
+  prepare:
+    if: |
+      (github.event_name == 'pull_request' && github.event.label.name == 'status/approved') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      has_candidates: ${{ steps.filter.outputs.has_candidates }}
+      pr_number:      ${{ steps.filter.outputs.pr_number }}
+      prompt:         ${{ steps.build.outputs.prompt }}
+      model:          ${{ steps.config.outputs.model }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install yq
+        run: |
+          mkdir -p ~/.local/bin
+          wget -qO ~/.local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x ~/.local/bin/yq
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Read config
+        id: config
+        run: echo "model=$(yq '.model' .github/config/config.yml)" >> $GITHUB_OUTPUT
+
+      - name: Identify PR to integrate
+        id: filter
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_NUMBER=${{ github.event.pull_request.number }}
+          else
+            PR_NUMBER=${{ inputs.pr_number }}
+          fi
+
+          # Verify PR is still open and approved
+          PR_STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
+          if [ "$PR_STATE" != "OPEN" ]; then
+            echo "has_candidates=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ PR #$PR_NUMBER is not open (state: $PR_STATE) — skipping." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          CHANGES_REQUESTED=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+            --json reviews \
+            --jq '[.reviews[] | select(.state == "CHANGES_REQUESTED")] | length')
+
+          if [ "$CHANGES_REQUESTED" != "0" ]; then
+            echo "has_candidates=false" >> $GITHUB_OUTPUT
+            echo "⚠️ PR #$PR_NUMBER has CHANGES_REQUESTED — skipping." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "has_candidates=true" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Collect PR context
+        if: steps.filter.outputs.has_candidates == 'true'
+        run: |
+          PR_NUMBER="${{ steps.filter.outputs.pr_number }}"
+          REPO="${{ github.repository }}"
+
+          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+            --json number,title,body,headRefName,baseRefName,reviewDecision,statusCheckRollup,mergeStateStatus,additions,deletions,changedFiles,commits)
+
+          DIFF_PREVIEW=$(gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null | head -300 || echo "(unavailable)")
+          CHANGED_FILES=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '[.files[].path]')
+          MAIN_SHA=$(git rev-parse HEAD)
+
+          {
+            echo 'PR_CONTEXT<<EOF'
+            echo "{\"pr\": $PR_DATA, \"changed_files\": $CHANGED_FILES, \"diff_preview\": $(echo "$DIFF_PREVIEW" | jq -Rs .), \"main_sha\": \"$MAIN_SHA\"}"
+            echo 'EOF'
+          } >> $GITHUB_ENV
+
+      - name: Build prompt
+        id: build
+        if: steps.filter.outputs.has_candidates == 'true'
+        run: |
+          echo "prompt=$(echo "$PR_CONTEXT" | jq -Rs .)" >> $GITHUB_OUTPUT
+
+  run:
+    needs: prepare
+    if: needs.prepare.outputs.has_candidates == 'true'
+    uses: ./.github/workflows/core-opencode-run.yml
+    with:
+      run-name:        'integrator-agent'
+      command:         'agentic-task-machine-integrate'
+      prompt:          ${{ needs.prepare.outputs.prompt }}
+      agent:           'integrator'
+      model:           ${{ needs.prepare.outputs.model }}
+      runner:          'ubuntu-latest'
+      timeout-minutes: 60
+    permissions:
+      issues:        write
+      pull-requests: write
+      contents:      write
+    secrets: inherit
+
+  verify:
+    needs: [prepare, run]
+    if: needs.prepare.outputs.has_candidates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR was merged
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+          PR_NUMBER="${{ needs.prepare.outputs.pr_number }}"
+
+          PR_STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
+
+          if [ "$PR_STATE" = "MERGED" ]; then
+            echo "✅ PR #$PR_NUMBER successfully merged." >> $GITHUB_STEP_SUMMARY
+          else
+            gh pr comment "$PR_NUMBER" \
+              --repo "$REPO" \
+              --body "❌ Integrator agent did not merge this PR (state: $PR_STATE). Will retry on next approval event or manual dispatch."
+            echo "⚠️ PR #$PR_NUMBER not merged (state: $PR_STATE) — will retry." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi

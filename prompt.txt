@@ -1,0 +1,26 @@
+Use the agentic workflow system skill to freshly create an agent state machine with:
+- Input: Issues by users directly tagged with "type/user"
+- A planner agent which adresses new "type/user" issues directly
+- The planner agent breaks down the issue into several digestable and best-effort-parallelizable (feature-wise) "type/task" (sub-)issues with implementation plans each
+  - Each "type/task" (sub-)issue mentions the parent "type/user" issue
+- A worker agent directly addresses new "type/task" for:
+ - Branch creation 
+ - Implementation
+ - PR creation
+ - Self-Review
+- An integrator agent who merges PRs (with a PAT as Github Secret) to main and solves merge conflicts or CI errors
+- An "type/task" closure event which triggers an quality agent
+- The quality agent checks if all referenced "type/task" (sub-)issues are closed for the "type/user", if that is the case it:
+  - Reviews the solution
+  - If insufficient creates new "type/task" (sub-)issues
+  - If sufficient closes the parent "type/user" issue
+- opencode to use opencode/big-pickle (the default)
+- Infra:
+```
+env:
+  # Corporate proxy settings (per opencode.ai/docs/network/)
+
+jobs:
+  [name]:
+    runs-on: ubuntu-latest
+```
