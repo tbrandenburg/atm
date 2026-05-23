@@ -1,2 +1,28 @@
-model: opencode/big-pickle
+defaults:
+  model: opencode/big-pickle
+  runner: ubuntu-latest
+  timeout_minutes: 120
+  proxy:
+    http: ""
+    https: ""
+    no_proxy: ""
+
 max_wip: 5
+
+agents:
+  planner:
+    model: opencode/big-pickle
+    runner: ubuntu-latest
+    timeout_minutes: 60
+  worker:
+    model: opencode/big-pickle
+    runner: ubuntu-latest
+    timeout_minutes: 120
+  quality:
+    model: opencode/big-pickle
+    runner: ubuntu-latest
+    timeout_minutes: 60
+  integrator:
+    model: opencode/big-pickle
+    runner: ubuntu-latest
+    timeout_minutes: 60

@@ -49,6 +49,21 @@ on:
         required: false
         type: string
         default: 'ubuntu-latest'
+      http-proxy:
+        description: 'Optional HTTP proxy for network operations'
+        required: false
+        type: string
+        default: ''
+      https-proxy:
+        description: 'Optional HTTPS proxy for network operations'
+        required: false
+        type: string
+        default: ''
+      no-proxy:
+        description: 'Optional comma-separated hosts that bypass proxies'
+        required: false
+        type: string
+        default: ''
     outputs:
       results:
         description: 'The output results from OpenCode (truncated if too large)'
@@ -73,6 +88,12 @@ jobs:
       artifact-name: ${{ steps.process-results.outputs.artifact-name }}
     env:
       GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
+      HTTP_PROXY: ${{ inputs['http-proxy'] }}
+      HTTPS_PROXY: ${{ inputs['https-proxy'] }}
+      NO_PROXY: ${{ inputs['no-proxy'] }}
+      http_proxy: ${{ inputs['http-proxy'] }}
+      https_proxy: ${{ inputs['https-proxy'] }}
+      no_proxy: ${{ inputs['no-proxy'] }}
 
     steps:
       - name: Checkout

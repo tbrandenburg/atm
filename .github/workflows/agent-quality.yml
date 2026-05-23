@@ -28,6 +28,11 @@ jobs:
       parent_numbers:  ${{ steps.filter.outputs.parent_numbers }}
       prompt:          ${{ steps.build.outputs.prompt }}
       model:           ${{ steps.config.outputs.model }}
+      runner:          ${{ steps.config.outputs.runner }}
+      timeout_minutes: ${{ steps.config.outputs.timeout_minutes }}
+      http_proxy:      ${{ steps.config.outputs.http_proxy }}
+      https_proxy:     ${{ steps.config.outputs.https_proxy }}
+      no_proxy:        ${{ steps.config.outputs.no_proxy }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +46,16 @@ jobs:
 
       - name: Read config
         id: config
-        run: echo "model=$(yq '.model' .github/config/config.yml)" >> $GITHUB_OUTPUT
+        run: |
+          CONFIG=.github/config/config.yml
+          {
+            echo "model=$(yq -r '.agents.quality.model // .defaults.model // .model' "$CONFIG")"
+            echo "runner=$(yq -r '.agents.quality.runner // .defaults.runner // "ubuntu-latest"' "$CONFIG")"
+            echo "timeout_minutes=$(yq -r '.agents.quality.timeout_minutes // .defaults.timeout_minutes // 60' "$CONFIG")"
+            echo "http_proxy=$(yq -r '.agents.quality.proxy.http // .defaults.proxy.http // ""' "$CONFIG")"
+            echo "https_proxy=$(yq -r '.agents.quality.proxy.https // .defaults.proxy.https // ""' "$CONFIG")"
+            echo "no_proxy=$(yq -r '.agents.quality.proxy.no_proxy // .defaults.proxy.no_proxy // ""' "$CONFIG")"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Find parent issues ready for quality review
         id: filter
@@ -220,8 +234,11 @@ jobs:
       prompt:          ${{ needs.prepare.outputs.prompt }}
       agent:           'quality'
       model:           ${{ needs.prepare.outputs.model }}
-      runner:          'ubuntu-latest'
-      timeout-minutes: 60
+      runner:          ${{ needs.prepare.outputs.runner }}
+      timeout-minutes: ${{ fromJSON(needs.prepare.outputs.timeout_minutes) }}
+      http-proxy:      ${{ needs.prepare.outputs.http_proxy }}
+      https-proxy:     ${{ needs.prepare.outputs.https_proxy }}
+      no-proxy:        ${{ needs.prepare.outputs.no_proxy }}
     permissions:
       issues:        write
       pull-requests: read

@@ -19,6 +19,7 @@ ATM_FILES = \
 	.github/workflows/sm-task.yml:Task_issue_state_machine \
 	.github/workflows/agent-integrator.yml:Integrator_agent_workflow \
 	.github/workflows/agent-quality.yml:Quality_agent_workflow \
+	.github/config/config.yml:Runtime_configuration \
 	.github/skills/agentic-workflow-system/.skill-meta.json:Skill_metadata \
 	.github/skills/agentic-workflow-system/SKILL.md:Agentic_workflow_skill \
 	.github/skills/agentic-workflow-system/references/AGENTIC_WORKFLOW_SYSTEM.md:Skill_reference \
