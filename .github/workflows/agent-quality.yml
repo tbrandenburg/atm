@@ -279,12 +279,11 @@ jobs:
               for f in gh-artifacts/tasks/${PARENT}-*.md; do
                 TITLE=$(head -1 "$f" | sed 's/^title: //')
                 BODY=$(tail -n +3 "$f")
-                CREATED_ISSUE=$(gh api \
-                  --method POST \
-                  "repos/$REPO/issues" \
-                  -f title="$TITLE" \
-                  -f body="$BODY" \
-                  -f labels[]=type/task)
+                CREATED_ISSUE=$(jq -n \
+                  --arg title "$TITLE" \
+                  --arg body "$BODY" \
+                  '{title: $title, body: $body, labels: ["type/task"]}' | \
+                  gh api --method POST "repos/$REPO/issues" --input -)
                 TASK_NUMBER=$(echo "$CREATED_ISSUE" | jq -r '.number')
                 TASK_ID=$(echo "$CREATED_ISSUE" | jq -r '.id')
                 gh api \
