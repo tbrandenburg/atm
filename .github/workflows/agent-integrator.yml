@@ -147,10 +147,44 @@ jobs:
 
           if [ "$PR_STATE" = "MERGED" ]; then
             echo "✅ PR #$PR_NUMBER successfully merged." >> "$GITHUB_STEP_SUMMARY"
-          else
-            gh pr comment "$PR_NUMBER" \
-              --repo "$REPO" \
-              --body "❌ Integrator agent did not merge this PR (state: $PR_STATE). Will retry on next approval event or manual dispatch."
-            echo "⚠️ PR #$PR_NUMBER not merged (state: $PR_STATE) — will retry." >> "$GITHUB_STEP_SUMMARY"
-            exit 1
+            exit 0
           fi
+
+          if [ "$PR_STATE" = "CLOSED" ]; then
+            git init verify-main
+            cd verify-main
+            git remote add origin "https://github.com/$REPO"
+            git fetch --depth=100 origin main
+
+            LANDED_COMMIT=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json comments \
+              --jq '[.comments[].body | capture("commit (?<sha>[0-9a-f]{7,40})")? | .sha] | map(select(. != null)) | last // ""')
+
+            if [ -n "$LANDED_COMMIT" ] && git merge-base --is-ancestor "$LANDED_COMMIT" origin/main; then
+              echo "✅ PR #$PR_NUMBER was closed after commit $LANDED_COMMIT landed on main." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            LANDED=true
+            PR_COMMITS=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json commits --jq '.commits[].oid')
+
+            for SHA in $PR_COMMITS; do
+              git fetch --depth=1 origin "$SHA"
+              CHERRY_STATUS=$(git cherry origin/main "$SHA" | awk '{print $1}')
+
+              if [ "$CHERRY_STATUS" != "-" ]; then
+                LANDED=false
+                break
+              fi
+            done
+
+            if [ "$LANDED" = "true" ]; then
+              echo "✅ PR #$PR_NUMBER was closed after equivalent changes landed on main." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$REPO" \
+            --body "❌ Integrator agent did not merge this PR (state: $PR_STATE). Will retry on next approval event or manual dispatch."
+          echo "⚠️ PR #$PR_NUMBER not merged (state: $PR_STATE) — will retry." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
