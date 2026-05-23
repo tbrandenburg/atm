@@ -2,6 +2,31 @@
 
 A fully autonomous, GitHub Actions–driven issue-resolution system. Human-created feature requests are broken down into parallelisable sub-tasks, implemented end-to-end by LLM agents, and validated for quality — all without human intervention unless an agent is explicitly blocked.
 
+## Installation
+
+Install ATM into another GitHub repository from that repository root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tbrandenburg/atm/main/Makefile.ghprj | make -f - install
+```
+
+Force overwrite existing ATM files:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tbrandenburg/atm/main/Makefile.ghprj | make -f - install-force
+```
+
+The installer copies the GitHub workflows, OpenCode agents, OpenCode commands, and the bundled agentic workflow skill. It also runs `setup-labels`, which creates or updates the required labels idempotently.
+
+Commit and push the installed files:
+
+```bash
+git add .github .opencode .atm-version && git commit -m "feat: Add ATM agentic workflow"
+git push
+```
+
+After installation, configure `AGENT_GH_TOKEN` in repository secrets if needed and enable GitHub Actions workflow write permissions and PR approval permissions.
+
 ## How it works
 
 | State | Entry condition | Agent | Core action | Exit condition |

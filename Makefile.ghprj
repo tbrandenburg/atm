@@ -1,6 +1,170 @@
-REPO ?= $(shell gh repo view --json nameWithOwner -q .nameWithOwner)
+# Agentic Task Machine (ATM) installer
+#
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/tbrandenburg/atm/main/Makefile.ghprj | make -f - install
+#   curl -fsSL https://raw.githubusercontent.com/tbrandenburg/atm/main/Makefile.ghprj | make -f - install-force
 
-.PHONY: setup-labels setup-token
+ATM_VERSION = 0.1.0
+
+SOURCE_REPO ?= tbrandenburg/atm
+SOURCE_BRANCH ?= main
+BASE_URL = https://raw.githubusercontent.com/$(SOURCE_REPO)/$(SOURCE_BRANCH)
+
+REPO ?= $(shell gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
+
+ATM_FILES = \
+	.github/workflows/core-opencode-run.yml:OpenCode_runner_workflow \
+	.github/workflows/core-state-heal.yml:State_healing_workflow \
+	.github/workflows/sm-user.yml:User_issue_state_machine \
+	.github/workflows/sm-task.yml:Task_issue_state_machine \
+	.github/workflows/agent-integrator.yml:Integrator_agent_workflow \
+	.github/workflows/agent-quality.yml:Quality_agent_workflow \
+	.github/skills/agentic-workflow-system/.skill-meta.json:Skill_metadata \
+	.github/skills/agentic-workflow-system/SKILL.md:Agentic_workflow_skill \
+	.github/skills/agentic-workflow-system/references/AGENTIC_WORKFLOW_SYSTEM.md:Skill_reference \
+	.github/skills/agentic-workflow-system/assets/examples/agent-workflow-template.yml:Agent_workflow_template \
+	.github/skills/agentic-workflow-system/assets/examples/config.yml:Example_config \
+	.github/skills/agentic-workflow-system/assets/examples/core-opencode-run.yml:OpenCode_runner_template \
+	.github/skills/agentic-workflow-system/assets/examples/core-state-heal.yml:State_heal_template \
+	.github/skills/agentic-workflow-system/assets/examples/sm-workflow-template.yml:State_machine_template \
+	.github/skills/agentic-workflow-system/assets/examples/agents/agent-template.md:Agent_template \
+	.github/skills/agentic-workflow-system/assets/examples/agents/dev.md:Dev_agent_example \
+	.github/skills/agentic-workflow-system/assets/examples/agents/groomer.md:Groomer_agent_example \
+	.github/skills/agentic-workflow-system/assets/examples/agents/integrator.md:Integrator_agent_example \
+	.github/skills/agentic-workflow-system/assets/examples/agents/planner.md:Planner_agent_example \
+	.github/skills/agentic-workflow-system/assets/examples/agents/review.md:Review_agent_example \
+	.github/skills/agentic-workflow-system/assets/examples/commands/command-template.md:Command_template \
+	.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-dev-issue.md:Dev_command_example \
+	.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-groom-issue.md:Groom_command_example \
+	.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-integrate.md:Integrate_command_example \
+	.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-plan-issue.md:Plan_command_example \
+	.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-resolve-ci-errors.md:Resolve_CI_command_example \
+	.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-review.md:Review_command_example \
+	.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-sprint-plan.md:Sprint_plan_command_example \
+	.github/skills/agentic-workflow-system/assets/examples/workflows/ghaw-backlog-grooming.yml:Backlog_grooming_workflow_example \
+	.github/skills/agentic-workflow-system/assets/examples/workflows/ghaw-cicd.yml:CICD_workflow_example \
+	.github/skills/agentic-workflow-system/assets/examples/workflows/ghaw-dev.yml:Dev_workflow_example \
+	.github/skills/agentic-workflow-system/assets/examples/workflows/ghaw-integrator.yml:Integrator_workflow_example \
+	.github/skills/agentic-workflow-system/assets/examples/workflows/ghaw-planner.yml:Planner_workflow_example \
+	.github/skills/agentic-workflow-system/assets/examples/workflows/ghaw-review.yml:Review_workflow_example \
+	.github/skills/agentic-workflow-system/assets/examples/workflows/ghaw-sprint-planning.yml:Sprint_planning_workflow_example \
+	.github/skills/agentic-workflow-system/assets/sim/__init__.py:Simulator_package \
+	.github/skills/agentic-workflow-system/assets/sim/agents.py:Simulator_agents \
+	.github/skills/agentic-workflow-system/assets/sim/engine.py:Simulator_engine \
+	.github/skills/agentic-workflow-system/assets/sim/models.py:Simulator_models \
+	.github/skills/agentic-workflow-system/assets/sim/project_agents_template.py:Simulator_project_agents_template \
+	.github/skills/agentic-workflow-system/assets/sim/pyproject.toml:Simulator_project_config \
+	.github/skills/agentic-workflow-system/assets/sim/test_state_machine_template.py:Simulator_test_template \
+	.opencode/agent/integrator.md:Integrator_agent \
+	.opencode/agent/planner.md:Planner_agent \
+	.opencode/agent/quality.md:Quality_agent \
+	.opencode/agent/worker.md:Worker_agent \
+	.opencode/commands/agentic-task-machine-integrate.md:Integrate_command \
+	.opencode/commands/agentic-task-machine-plan-user-issue.md:Plan_user_issue_command \
+	.opencode/commands/agentic-task-machine-quality-check.md:Quality_check_command \
+	.opencode/commands/agentic-task-machine-work-task-issue.md:Work_task_issue_command \
+	.opencode/opencode.jsonc:OpenCode_configuration
+
+.NOTPARALLEL:
+
+.PHONY: help install install-dry install-force install-files install-summary setup-dirs setup-labels setup-labels-dry setup-token clean validate info
+
+help:
+	@echo "Agentic Task Machine (ATM) installer"
+	@echo ""
+	@echo "Usage:"
+	@echo "  make -f Makefile.ghprj install        Install ATM files and labels"
+	@echo "  make -f Makefile.ghprj install-force  Install and overwrite existing files"
+	@echo "  make -f Makefile.ghprj install-dry    Show what would be installed"
+	@echo "  make -f Makefile.ghprj setup-labels   Create or update required labels"
+	@echo "  make -f Makefile.ghprj clean          Remove installed ATM files"
+	@echo ""
+	@echo "One-liner installation:"
+	@echo "  curl -fsSL https://raw.githubusercontent.com/$(SOURCE_REPO)/$(SOURCE_BRANCH)/Makefile.ghprj | make -f - install"
+	@echo "  curl -fsSL https://raw.githubusercontent.com/$(SOURCE_REPO)/$(SOURCE_BRANCH)/Makefile.ghprj | make -f - install-force"
+	@echo ""
+	@echo "Variables:"
+	@echo "  SOURCE_REPO=$(SOURCE_REPO)"
+	@echo "  SOURCE_BRANCH=$(SOURCE_BRANCH)"
+	@echo "  REPO=$(REPO)"
+
+setup-dirs:
+	@echo "Creating required directories..."
+	@for file_desc in $(ATM_FILES); do \
+		file_path=$$(printf '%s' "$$file_desc" | cut -d: -f1); \
+		mkdir -p "$$(dirname "$$file_path")"; \
+	done
+
+install: FORCE = 0
+install: MODE = if missing
+install: setup-dirs install-files setup-labels install-summary
+
+install-force: FORCE = 1
+install-force: MODE = forced overwrite
+install-force: setup-dirs install-files setup-labels install-summary
+
+install-files:
+	@for file_desc in $(ATM_FILES); do \
+		file_path=$$(printf '%s' "$$file_desc" | cut -d: -f1); \
+		file_desc_part=$$(printf '%s' "$$file_desc" | cut -d: -f2 | sed 's/_/ /g'); \
+		file_name=$$(basename "$$file_path"); \
+		if [ ! -f "$$file_path" ] || [ "$(FORCE)" = "1" ]; then \
+			if [ "$(FORCE)" = "1" ] && [ -f "$$file_path" ]; then \
+				echo "Overwriting $$file_name..."; \
+			else \
+				echo "Downloading $$file_desc_part..."; \
+			fi; \
+			if curl -fsSL "$(BASE_URL)/$$file_path" -o "$$file_path"; then \
+				echo "Downloaded $$file_path"; \
+			else \
+				echo "Failed to download $$file_path from $(BASE_URL)/$$file_path"; \
+				rm -f "$$file_path"; \
+				exit 1; \
+			fi; \
+		else \
+			echo "$$file_name already exists - skipping download"; \
+		fi; \
+	done
+	@printf '%s\n' "$(ATM_VERSION)" > .atm-version
+	@echo "Installed version $(ATM_VERSION) recorded in .atm-version"
+
+install-summary:
+	@echo ""
+	@echo "ATM installation complete."
+	@echo ""
+	@echo "Installed files:"
+	@for file_desc in $(ATM_FILES); do \
+		file_path=$$(printf '%s' "$$file_desc" | cut -d: -f1); \
+		file_desc_part=$$(printf '%s' "$$file_desc" | cut -d: -f2 | sed 's/_/ /g'); \
+		echo "  $$file_path - $$file_desc_part ($(MODE))"; \
+	done
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Commit and push the new files:"
+	@echo "     git add .github .opencode .atm-version && git commit -m 'feat: Add ATM agentic workflow'"
+	@echo "  2. Configure AGENT_GH_TOKEN in repository secrets if needed."
+	@echo "  3. Enable GitHub Actions workflow write permissions and PR approval permissions."
+
+install-dry: setup-dirs
+	@echo "DRY RUN: Checking what would be installed..."
+	@echo ""
+	@for file_desc in $(ATM_FILES); do \
+		file_path=$$(printf '%s' "$$file_desc" | cut -d: -f1); \
+		file_desc_part=$$(printf '%s' "$$file_desc" | cut -d: -f2 | sed 's/_/ /g'); \
+		if [ ! -f "$$file_path" ]; then \
+			echo "Would download $$file_desc_part from $(BASE_URL)/$$file_path"; \
+		else \
+			echo "$$file_path already exists - would skip download"; \
+		fi; \
+	done
+	@echo ""
+	@echo "DRY RUN: Required labels for $(REPO):"
+	@echo "  type/user         0075ca  User-facing feature request"
+	@echo "  type/task         e4e669  Implementation sub-task"
+	@echo "  blocked           d93f0b  Blocked - requires human intervention"
+	@echo "  status/approved   0e8a16  PR reviewed and ready for integrator to merge"
+	@echo ""
+	@echo "To install, run: make -f Makefile.ghprj install"
 
 setup-token: ## Set AGENT_GH_TOKEN from the current gh auth token for this repository
 	@echo "Setting AGENT_GH_TOKEN in $(REPO)..."
@@ -8,46 +172,60 @@ setup-token: ## Set AGENT_GH_TOKEN from the current gh auth token for this repos
 	@echo "Token setup complete."
 
 setup-labels: ## Create all required labels in the target repository
+	@if [ -z "$(REPO)" ]; then echo "REPO is required. Run inside a GitHub repo or pass REPO=owner/name."; exit 1; fi
 	@echo "Setting up labels in $(REPO)..."
-
-	@gh api -X POST "repos/$(REPO)/labels" \
-		--field name="type/user" \
-		--field color="0075ca" \
-		--field description="User-facing feature request" \
-		2>/dev/null || \
-	gh api -X PATCH "repos/$(REPO)/labels/type%2Fuser" \
-		--field color="0075ca" \
-		--field description="User-facing feature request"
-	@echo "  ✓ type/user"
-
-	@gh api -X POST "repos/$(REPO)/labels" \
-		--field name="type/task" \
-		--field color="e4e669" \
-		--field description="Implementation sub-task" \
-		2>/dev/null || \
-	gh api -X PATCH "repos/$(REPO)/labels/type%2Ftask" \
-		--field color="e4e669" \
-		--field description="Implementation sub-task"
-	@echo "  ✓ type/task"
-
-	@gh api -X POST "repos/$(REPO)/labels" \
-		--field name="blocked" \
-		--field color="d93f0b" \
-		--field description="Blocked — requires human intervention" \
-		2>/dev/null || \
-	gh api -X PATCH "repos/$(REPO)/labels/blocked" \
-		--field color="d93f0b" \
-		--field description="Blocked — requires human intervention"
-	@echo "  ✓ blocked"
-
-	@gh api -X POST "repos/$(REPO)/labels" \
-		--field name="status/approved" \
-		--field color="0e8a16" \
-		--field description="PR reviewed and ready for integrator to merge" \
-		2>/dev/null || \
-	gh api -X PATCH "repos/$(REPO)/labels/status%2Fapproved" \
-		--field color="0e8a16" \
-		--field description="PR reviewed and ready for integrator to merge"
-	@echo "  ✓ status/approved"
-
+	@for label_spec in \
+		"type/user|0075ca|User-facing feature request" \
+		"type/task|e4e669|Implementation sub-task" \
+		"blocked|d93f0b|Blocked - requires human intervention" \
+		"status/approved|0e8a16|PR reviewed and ready for integrator to merge"; do \
+		name=$$(printf '%s' "$$label_spec" | cut -d'|' -f1); \
+		color=$$(printf '%s' "$$label_spec" | cut -d'|' -f2); \
+		description=$$(printf '%s' "$$label_spec" | cut -d'|' -f3-); \
+		encoded=$$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$$name"); \
+		if gh api "repos/$(REPO)/labels/$$encoded" >/dev/null 2>&1; then \
+			gh api -X PATCH "repos/$(REPO)/labels/$$encoded" --field color="$$color" --field description="$$description" >/dev/null; \
+		else \
+			gh api -X POST "repos/$(REPO)/labels" --field name="$$name" --field color="$$color" --field description="$$description" >/dev/null; \
+		fi; \
+		echo "  $$name"; \
+	done
 	@echo "Labels setup complete."
+
+setup-labels-dry: ## Preview required labels without applying changes
+	@echo "DRY RUN: Required labels for $(REPO):"
+	@echo "  type/user         0075ca  User-facing feature request"
+	@echo "  type/task         e4e669  Implementation sub-task"
+	@echo "  blocked           d93f0b  Blocked - requires human intervention"
+	@echo "  status/approved   0e8a16  PR reviewed and ready for integrator to merge"
+
+clean:
+	@echo "Removing ATM files..."
+	@for file_desc in $(ATM_FILES); do \
+		file_path=$$(printf '%s' "$$file_desc" | cut -d: -f1); \
+		if [ -f "$$file_path" ]; then \
+			rm -f "$$file_path" && echo "Removed $$file_path"; \
+		fi; \
+	done
+	@rm -f .atm-version && echo "Removed .atm-version"
+
+validate:
+	@command -v curl >/dev/null 2>&1 || { echo "curl is required"; exit 1; }
+	@command -v gh >/dev/null 2>&1 || { echo "gh is required"; exit 1; }
+	@command -v python3 >/dev/null 2>&1 || { echo "python3 is required"; exit 1; }
+	@echo "Validation passed - ready to install"
+
+info:
+	@echo "Configuration Information:"
+	@echo "  ATM_VERSION: $(ATM_VERSION)"
+	@echo "  SOURCE_REPO: $(SOURCE_REPO)"
+	@echo "  SOURCE_BRANCH: $(SOURCE_BRANCH)"
+	@echo "  BASE_URL: $(BASE_URL)"
+	@echo "  REPO: $(REPO)"
+	@if [ -f .atm-version ]; then echo "  Installed version: $$(cat .atm-version)"; else echo "  Installed version: (not installed)"; fi
+	@echo "  Files to install:"
+	@for file_desc in $(ATM_FILES); do \
+		file_path=$$(printf '%s' "$$file_desc" | cut -d: -f1); \
+		file_desc_part=$$(printf '%s' "$$file_desc" | cut -d: -f2 | sed 's/_/ /g'); \
+		echo "    $$file_path - $$file_desc_part"; \
+	done
