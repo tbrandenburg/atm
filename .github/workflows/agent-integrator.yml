@@ -39,11 +39,11 @@ jobs:
           mkdir -p ~/.local/bin
           wget -qO ~/.local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           chmod +x ~/.local/bin/yq
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Read config
         id: config
-        run: echo "model=$(yq '.model' .github/config/config.yml)" >> $GITHUB_OUTPUT
+        run: echo "model=$(yq '.model' .github/config/config.yml)" >> "$GITHUB_OUTPUT"
 
       - name: Identify PR to integrate
         id: filter
@@ -53,16 +53,16 @@ jobs:
           REPO="${{ github.repository }}"
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            PR_NUMBER=${{ github.event.pull_request.number }}
+            PR_NUMBER="${{ github.event.pull_request.number }}"
           else
-            PR_NUMBER=${{ inputs.pr_number }}
+            PR_NUMBER="${{ inputs.pr_number }}"
           fi
 
           # Verify PR is still open and approved
           PR_STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
           if [ "$PR_STATE" != "OPEN" ]; then
-            echo "has_candidates=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ PR #$PR_NUMBER is not open (state: $PR_STATE) — skipping." >> $GITHUB_STEP_SUMMARY
+            echo "has_candidates=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ PR #$PR_NUMBER is not open (state: $PR_STATE) — skipping." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
@@ -71,13 +71,13 @@ jobs:
             --jq '[.reviews[] | select(.state == "CHANGES_REQUESTED")] | length')
 
           if [ "$CHANGES_REQUESTED" != "0" ]; then
-            echo "has_candidates=false" >> $GITHUB_OUTPUT
-            echo "⚠️ PR #$PR_NUMBER has CHANGES_REQUESTED — skipping." >> $GITHUB_STEP_SUMMARY
+            echo "has_candidates=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ PR #$PR_NUMBER has CHANGES_REQUESTED — skipping." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          echo "has_candidates=true" >> $GITHUB_OUTPUT
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "has_candidates=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Collect PR context
         if: steps.filter.outputs.has_candidates == 'true'
@@ -91,18 +91,25 @@ jobs:
           DIFF_PREVIEW=$(gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null | head -300 || echo "(unavailable)")
           CHANGED_FILES=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json files --jq '[.files[].path]')
           MAIN_SHA=$(git rev-parse HEAD)
+          DIFF_PREVIEW_JSON=$(printf '%s' "$DIFF_PREVIEW" | jq -Rs .)
 
           {
             echo 'PR_CONTEXT<<EOF'
-            echo "{\"pr\": $PR_DATA, \"changed_files\": $CHANGED_FILES, \"diff_preview\": $(echo "$DIFF_PREVIEW" | jq -Rs .), \"main_sha\": \"$MAIN_SHA\"}"
+            jq -cn \
+              --argjson pr "$PR_DATA" \
+              --argjson changed_files "$CHANGED_FILES" \
+              --argjson diff_preview "$DIFF_PREVIEW_JSON" \
+              --arg main_sha "$MAIN_SHA" \
+              --arg integrator_workflow_name "${{ github.workflow }}" \
+              '{pr: $pr, changed_files: $changed_files, diff_preview: $diff_preview, main_sha: $main_sha, integrator_workflow_name: $integrator_workflow_name}'
             echo 'EOF'
-          } >> $GITHUB_ENV
+          } >> "$GITHUB_ENV"
 
       - name: Build prompt
         id: build
         if: steps.filter.outputs.has_candidates == 'true'
         run: |
-          echo "prompt=$(echo "$PR_CONTEXT" | jq -Rs .)" >> $GITHUB_OUTPUT
+          echo "prompt=$(printf '%s' "$PR_CONTEXT" | jq -Rs .)" >> "$GITHUB_OUTPUT"
 
   run:
     needs: prepare
@@ -114,6 +121,8 @@ jobs:
       prompt:          ${{ needs.prepare.outputs.prompt }}
       agent:           'integrator'
       model:           ${{ needs.prepare.outputs.model }}
+      git-user-name:   'Agent Integrator'
+      git-user-email:  'agent@agentic-task-machine.dev'
       runner:          'ubuntu-latest'
       timeout-minutes: 60
     permissions:
@@ -137,11 +146,11 @@ jobs:
           PR_STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
 
           if [ "$PR_STATE" = "MERGED" ]; then
-            echo "✅ PR #$PR_NUMBER successfully merged." >> $GITHUB_STEP_SUMMARY
+            echo "✅ PR #$PR_NUMBER successfully merged." >> "$GITHUB_STEP_SUMMARY"
           else
             gh pr comment "$PR_NUMBER" \
               --repo "$REPO" \
               --body "❌ Integrator agent did not merge this PR (state: $PR_STATE). Will retry on next approval event or manual dispatch."
-            echo "⚠️ PR #$PR_NUMBER not merged (state: $PR_STATE) — will retry." >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ PR #$PR_NUMBER not merged (state: $PR_STATE) — will retry." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

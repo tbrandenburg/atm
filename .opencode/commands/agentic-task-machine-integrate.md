@@ -14,6 +14,7 @@ Read the full input. Extract:
 - Review decision and merge state status
 - CI check results (statusCheckRollup)
 - Changed files and diff preview
+- Integrator workflow/check identity if present
 
 ## Step 2: Pre-Merge Eligibility Check
 
@@ -32,6 +33,14 @@ If any `CHANGES_REQUESTED` reviews exist:
 
 Stop — do not merge.
 
+Configure local git identity before any operation that may create commits during conflict
+resolution or CI fixes:
+
+    git config user.email "agent@agentic-task-machine.dev"
+    git config user.name "Agent Integrator"
+
+Do this once before any `git rebase`, `git merge`, or `git commit`.
+
 ## Step 3: Update Branch if Behind or Dirty
 
 If `mergeStateStatus` is `BEHIND` or `DIRTY`:
@@ -41,14 +50,40 @@ If `mergeStateStatus` is `BEHIND` or `DIRTY`:
     git rebase origin/main
     git push --force-with-lease origin {branch}
 
+If `git rebase origin/main` stops for conflicts, resolve the conflicts minimally, then run:
+
+    git add {resolved-files}
+    GIT_EDITOR=true git rebase --continue
+
+Do not use `git rebase --continue --no-edit`; it is not supported by all Git versions.
+
 Wait a moment for GitHub to process the push before checking CI.
 
 ## Step 4: Ensure CI is Green
 
-Check current CI status:
+Check current CI status, ignoring only this integrator workflow's own still-running check.
+The current integrator check commonly appears as `workflowName ==
+"agentic-task-machine - Integrator Agent"` and `name == "run / run"`; it cannot
+complete while this command is still running, so waiting on it creates a circular wait.
+
+Use filtered checks for every failure and pending-check decision:
+
+    CHECK_FILTER='map(select(.workflowName != "agentic-task-machine - Integrator Agent"))'
+
+Check for failures:
 
     gh pr view {pr} --json statusCheckRollup \
-      --jq '.statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "TIMED_OUT")'
+      --jq ".statusCheckRollup | ${CHECK_FILTER} | .[] | select(.conclusion == \"FAILURE\" or .conclusion == \"TIMED_OUT\")"
+
+Check for pending non-integrator checks before waiting:
+
+    gh pr view {pr} --json statusCheckRollup \
+      --jq ".statusCheckRollup | ${CHECK_FILTER} | [.[] | select(.status != \"COMPLETED\")] | length"
+
+If the count is `0`, proceed even when `mergeStateStatus` is `UNSTABLE`; the only pending
+check is the integrator's own check. If non-integrator checks are pending, poll at most 12
+times with 10 seconds between attempts. Stop polling as soon as only integrator checks
+remain pending.
 
 If failures exist:
 
@@ -68,7 +103,8 @@ Based on the failure logs, apply the minimal fix (typo in test, import error, fo
 
 ### 4c: Wait for CI
 
-After pushing the fix, check CI again. Repeat steps 4a–4c if CI still fails (max 3 attempts).
+After pushing the fix, check filtered CI again. Repeat steps 4a–4c if CI still fails
+(max 3 attempts). Do not wait on the current integrator workflow's own check.
 
 If after 3 attempts CI still fails:
 
