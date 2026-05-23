@@ -69,8 +69,6 @@ agent instructions):
     cat > gh-artifacts/tasks/{parent_number}-gap-1-{slug}.md <<'EOF'
     title: {gap title}
 
-    Parent issue: #{parent_number}
-
     ## Context
     Follow-up from quality review of parent issue #{parent_number}.
 

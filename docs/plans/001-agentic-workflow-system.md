@@ -39,7 +39,7 @@ Files to read **before implementing**. Understand each before touching any file.
 
 **Metadata label format:** namespaced, kebab-case (`type/user`, `type/task`)
 
-**Sub-issue parent reference:** every `type/task` body must contain `Parent issue: #N`
+**Sub-issue parent reference:** GitHub's native sub-issue relation is authoritative; legacy `Parent issue: #N` body references are migration fallback only.
 
 **Atomic task creation:** planner and quality agents write `.agentic-task-machine/tasks/{parent}-{n}-{slug}.md`
 files (gitignored). Format: line 1 = `title: {title}`, line 2 blank, lines 3+ = issue body.
@@ -167,7 +167,7 @@ Execute in order. Each task is atomic and independently verifiable.
 
 - **MIRROR**: `agent-workflow-template.yml`
 - **TRIGGER**: `issues: closed` + schedule every 6h
-- **PREPARE**: if `issues: closed` event, check issue has `type/task`; find `Parent issue: #N`; check all sibling `type/task` issues are closed and parent is still open; skip if not all closed or parent already closed
+- **PREPARE**: if `issues: closed` event, check issue has `type/task`; find the parent via GitHub's sub-issue relation; check all sibling `type/task` sub-issues are closed and parent is still open; skip if not all closed or parent already closed
 - **SIGNAL**: `<!-- QUALITY-PASSED -->` or `<!-- QUALITY-FAILED -->`
 - **VERIFY**: if QUALITY-PASSED → close parent `type/user`; if QUALITY-FAILED → new `type/task` sub-issues created by agent; if no signal → post comment + exit 0 (retry on schedule)
 - **PROXY**: none
@@ -177,7 +177,7 @@ Execute in order. Each task is atomic and independently verifiable.
 ### CREATE `.opencode/agent/planner.md`
 
 - **MIRROR**: `.github/skills/agentic-workflow-system/assets/examples/agents/planner.md`
-- **OUTPUT CONTRACT**: creates `type/task` sub-issues with `Parent issue: #N` in body; posts a plain summary comment (no signal marker needed)
+- **OUTPUT CONTRACT**: writes task files whose filenames include the parent number; verify creates `type/task` issues and attaches GitHub sub-issue relations; posts a plain summary comment (no signal marker needed)
 - **VALIDATE**: `grep -q "^description:" .opencode/agent/planner.md || echo FAIL`
 
 ### CREATE `.opencode/agent/worker.md`
@@ -201,7 +201,7 @@ Execute in order. Each task is atomic and independently verifiable.
 ### CREATE `.opencode/commands/agentic-task-machine-plan-user-issue.md`
 
 - **MIRROR**: `.github/skills/agentic-workflow-system/assets/examples/commands/ghaw-plan-issue.md`
-- **PATTERN**: create N `type/task` issues each with `Parent issue: #N` and implementation plan; post a plain summary comment on parent
+- **PATTERN**: create N `type/task` issue files with implementation plans; verify creates issues and attaches them to the parent using GitHub sub-issue relations; post a plain summary comment on parent
 - **VALIDATE**: `grep -q "^argument-hint:" .opencode/commands/agentic-task-machine-plan-user-issue.md || echo FAIL`
 
 ### CREATE `.opencode/commands/agentic-task-machine-work-task-issue.md`

@@ -32,14 +32,11 @@ issue content is used for.
 
 ## Step 3: Check if Already Planned
 
-Before creating sub-issues, verify no `type/task` issues already exist for this parent:
+Before creating sub-issues, verify no GitHub sub-issues already exist for this parent:
 
-    gh issue list \
-      --label "type/task" \
-      --state all \
-      --limit 500 \
-      --json number,body \
-      --jq "[.[] | select(.body | test(\"Parent issue: #${ISSUE_NUMBER}\"))] | length"
+    gh api --paginate \
+      "repos/{owner}/{repo}/issues/${ISSUE_NUMBER}/sub_issues?per_page=100" \
+      --jq '.[]' | jq -s length
 
 If count > 0, this issue is already planned — skip it and log a note.
 
@@ -65,8 +62,6 @@ Write one file per sub-task. File naming and format are defined in your agent in
     mkdir -p gh-artifacts/tasks
     cat > gh-artifacts/tasks/{parent_number}-1-{slug}.md <<'EOF'
     title: {sub-task title}
-
-    Parent issue: #{parent_number}
 
     ## Context
     {which part of the parent feature this covers}

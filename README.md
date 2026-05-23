@@ -6,7 +6,7 @@ A fully autonomous, GitHub Actions–driven issue-resolution system. Human-creat
 
 | State | Entry condition | Agent | Core action | Exit condition |
 |---|---|---|---|---|
-| **New user issue** | Issue opened by a human — `type/user` label auto-applied | Planner | Break into parallelisable `type/task` sub-issues | `type/task` sub-issues exist referencing parent |
+| **New user issue** | Issue opened by a human — `type/user` label auto-applied | Planner | Break into parallelisable `type/task` sub-issues | `type/task` sub-issues exist with GitHub sub-issue relations to parent |
 | **New task issue** | Issue labeled `type/task` _or_ `blocked` removed | Worker | Create branch → implement → open PR → self-review + approve | Linked open PR exists |
 | **Merge** | PR approved by worker self-review | Integrator | Ensure CI is green → merge to `main` → close `type/task` issue | PR merged, issue closed |
 | **Quality check** | All `type/task` for a `type/user` are closed | Quality | Review merged PRs; judge sufficiency | Sufficient → close `type/user`; insufficient → new `type/task` issues |

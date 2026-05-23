@@ -66,7 +66,7 @@ verify quality with an automated pipeline of LLM agents. Humans define what to b
 
 | State | Entry Condition | Agent | Core Action | Exit Condition | Next Step |
 |---|---|---|---|---|---|
-| **New user issue** | Issue opened by a human (non-bot) — `type/user` label auto-applied on `issues: opened` | Planner | Break user issue into parallelisable `type/task` sub-issues with implementation plans | `type/task` sub-issues exist in repo referencing parent | Sub-issues trigger worker independently |
+| **New user issue** | Issue opened by a human (non-bot) — `type/user` label auto-applied on `issues: opened` | Planner | Break user issue into parallelisable `type/task` sub-issues with implementation plans | `type/task` sub-issues exist in repo with GitHub sub-issue relations to parent | Sub-issues trigger worker independently |
 | **New task issue** | Issue opened with `type/task` label _or_ `blocked` removed | Worker | Create branch → implement → open PR → self-review + label PR `status/approved` | Linked open PR exists | Integrator picks up PR labeled `status/approved` |
 | **Merge** | `status/approved` label added to PR (by worker self-review) | Integrator | Ensure CI is green (fix if failing) → merge PR to `main` (resolve conflicts if needed); close linked `type/task` issue | PR merged, issue closed | Last task closure triggers quality |
 | **Quality check** | All `type/task` for a `type/user` are closed | Quality | Review all merged PRs + issue comments; judge sufficiency | Signal posted | Sufficient → close `type/user`; insufficient → new `type/task` issues |
@@ -106,13 +106,13 @@ verify quality with an automated pipeline of LLM agents. Humans define what to b
 ---
 
 ## Technical Notes
-- **Sub-issue parent reference**: Every `type/task` issue body must contain a line
-  `Parent issue: #N` (where N is the `type/user` issue number). The quality agent uses
-  this to locate siblings.
+- **Sub-issue parent reference**: GitHub's native sub-issue relation is authoritative.
+  The quality agent uses the GitHub API to locate a task's parent and sibling tasks.
+  Legacy `Parent issue: #N` body references are supported only as a migration fallback.
 - **Atomic task creation**: The planner and quality agents write temporary
   `.agentic-task-machine/tasks/{parent}-{n}-{slug}.md` files (ignored by git). The verify step reads
-  these files and creates GitHub issues with `gh issue create --label "type/task"` in one
-  atomic command — ensuring `type/task` is present on the issue from the moment it exists.
+  these files, creates GitHub issues with the `type/task` label, and attaches native
+  GitHub sub-issue relations to the parent — ensuring `type/task` is present on the issue from the moment it exists.
   This makes the sm-user.yml trigger filter reliable: any `issues: opened` event where
   the issue already carries `type/task` is skipped (agent-created); all others are human.
 - **Proxy**: No proxy is configured; workflows use direct github.com/network access.

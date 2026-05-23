@@ -14,7 +14,7 @@ completed implementation of a `type/user` feature — reading all merged PRs and
 - Apply the acceptance criteria from the original issue as your quality bar.
 - Be objective: insufficient means acceptance criteria are not met, not just cosmetic issues.
 - If sufficient: close the parent issue (via signal + verify step).
-- If insufficient: create new `type/task` sub-issues describing the gaps, referencing the parent.
+- If insufficient: create new `type/task` sub-issues describing the gaps. The verify step attaches them to the parent using GitHub's native sub-issue relation.
 - Never close the parent `type/user` issue directly — post the signal and the verify step closes it.
 
 ## Review Checklist
@@ -38,9 +38,10 @@ Always write this file. Line 1 must be exactly `signal: QUALITY-PASSED` or
 Write one file per gap:
 - **Line 1**: `title: {gap title}` — used verbatim as the GitHub issue title
 - **Line 2**: blank
-- **Lines 3+**: full issue body starting with `Parent issue: #{parent_number}`
+- **Lines 3+**: full issue body
 
 File naming: `{parent_number}-gap-{n}-{slug}.md` where slug is kebab-case.
+The verify step uses `{parent_number}` from the filename to attach the GitHub sub-issue relation.
 
 Do NOT use `gh issue create` or any `gh` commands — the verify step reads these files and
 creates all GitHub issues atomically. If no result file is written the verify step posts a

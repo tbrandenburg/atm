@@ -61,13 +61,20 @@ jobs:
               echo "ℹ️ Closed issue is not a type/task — skipping." >> $GITHUB_STEP_SUMMARY
               exit 0
             fi
-            # Extract parent issue number from body
-            BODY=$(gh issue view ${{ github.event.issue.number }} \
-              --repo "$REPO" --json body --jq '.body')
-            PARENT_NUM=$(echo "$BODY" | grep -oP '(?<=Parent issue: #)\d+' | head -1)
+            # Prefer GitHub's native sub-issue relation. Fall back to legacy body
+            # references so existing tasks can still complete quality review.
+            PARENT_JSON=$(gh api \
+              "repos/$REPO/issues/${{ github.event.issue.number }}/parent" \
+              2>/dev/null || true)
+            PARENT_NUM=$(echo "$PARENT_JSON" | jq -r '.number // empty')
+            if [ -z "$PARENT_NUM" ]; then
+              BODY=$(gh issue view ${{ github.event.issue.number }} \
+                --repo "$REPO" --json body --jq '.body')
+              PARENT_NUM=$(echo "$BODY" | grep -oP '(?<=Parent issue: #)\d+' | head -1)
+            fi
             if [ -z "$PARENT_NUM" ]; then
               echo "has_candidates=false" >> $GITHUB_OUTPUT
-              echo "ℹ️ Closed type/task has no Parent issue reference — skipping." >> $GITHUB_STEP_SUMMARY
+              echo "ℹ️ Closed type/task has no GitHub parent relation or legacy Parent issue reference — skipping." >> $GITHUB_STEP_SUMMARY
               exit 0
             fi
             PARENTS_TO_CHECK="[$PARENT_NUM]"
@@ -84,14 +91,20 @@ jobs:
               continue
             fi
 
-            # Find all type/task sub-issues for this parent
-            ALL_TASKS=$(gh issue list \
-              --repo "$REPO" \
-              --label "type/task" \
-              --state all \
-              --limit 500 \
-              --json number,state,body \
-              --jq "[.[] | select(.body | test(\"Parent issue: #${PARENT}([^0-9]|$)\"))]")
+            # Find all type/task sub-issues for this parent. Prefer GitHub's
+            # native relation and fall back to legacy body references.
+            ALL_TASKS=$( (gh api --paginate \
+              "repos/$REPO/issues/$PARENT/sub_issues?per_page=100" \
+              --jq '.[]' 2>/dev/null || true) | jq -s '[.[] | select([.labels[].name] | contains(["type/task"])) | .state = (.state | ascii_upcase)]')
+            if [ "$(echo "$ALL_TASKS" | jq length)" = "0" ]; then
+              ALL_TASKS=$(gh issue list \
+                --repo "$REPO" \
+                --label "type/task" \
+                --state all \
+                --limit 500 \
+                --json number,state,body \
+                --jq "[.[] | select(.body | test(\"Parent issue: #${PARENT}([^0-9]|$)\"))]")
+            fi
 
             TOTAL=$(echo "$ALL_TASKS" | jq length)
             if [ "$TOTAL" = "0" ]; then
@@ -133,14 +146,29 @@ jobs:
               --repo "$REPO" \
               --json number,title,body,labels,comments)
 
-            # All type/task sub-issues (closed)
-            TASKS=$(gh issue list \
-              --repo "$REPO" \
-              --label "type/task" \
-              --state closed \
-              --limit 500 \
-              --json number,title,body,comments \
-              --jq "[.[] | select(.body | test(\"Parent issue: #${PARENT}([^0-9]|$)\"))]")
+            # All closed type/task sub-issues. Prefer GitHub's native relation
+            # and fall back to legacy body references.
+            TASKS=$( (gh api --paginate \
+              "repos/$REPO/issues/$PARENT/sub_issues?per_page=100" \
+              --jq '.[]' 2>/dev/null || true) | jq -s '[.[] | select(.state == "closed" and ([.labels[].name] | contains(["type/task"])))]')
+            if [ "$(echo "$TASKS" | jq length)" = "0" ]; then
+              TASKS=$(gh issue list \
+                --repo "$REPO" \
+                --label "type/task" \
+                --state closed \
+                --limit 500 \
+                --json number,title,body,comments \
+                --jq "[.[] | select(.body | test(\"Parent issue: #${PARENT}([^0-9]|$)\"))]")
+            else
+              TASK_DETAILS="[]"
+              for TASK_NUM in $(echo "$TASKS" | jq -r '.[].number'); do
+                TASK_DATA=$(gh issue view "$TASK_NUM" \
+                  --repo "$REPO" \
+                  --json number,title,body,comments)
+                TASK_DETAILS=$(echo "$TASK_DETAILS" | jq --argjson task "$TASK_DATA" '. + [$task]')
+              done
+              TASKS="$TASK_DETAILS"
+            fi
 
             # Merged PRs linked to each task
             PR_DATA="{}"
@@ -251,12 +279,19 @@ jobs:
               for f in gh-artifacts/tasks/${PARENT}-*.md; do
                 TITLE=$(head -1 "$f" | sed 's/^title: //')
                 BODY=$(tail -n +3 "$f")
-                gh issue create \
-                  --repo "$REPO" \
-                  --title "$TITLE" \
-                  --body "$BODY" \
-                  --label "type/task"
-                echo "✅ #$PARENT — created follow-up type/task: $TITLE" >> $GITHUB_STEP_SUMMARY
+                CREATED_ISSUE=$(gh api \
+                  --method POST \
+                  "repos/$REPO/issues" \
+                  -f title="$TITLE" \
+                  -f body="$BODY" \
+                  -f labels[]=type/task)
+                TASK_NUMBER=$(echo "$CREATED_ISSUE" | jq -r '.number')
+                TASK_ID=$(echo "$CREATED_ISSUE" | jq -r '.id')
+                gh api \
+                  --method POST \
+                  "repos/$REPO/issues/$PARENT/sub_issues" \
+                  -F sub_issue_id="$TASK_ID" >/dev/null
+                echo "✅ #$PARENT — created follow-up type/task #$TASK_NUMBER: $TITLE" >> $GITHUB_STEP_SUMMARY
                 CREATED=$((CREATED + 1))
               done
               shopt -u nullglob

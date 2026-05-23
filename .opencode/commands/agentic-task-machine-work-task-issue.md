@@ -14,7 +14,10 @@ argument-hint: <issue-number-or-json>
     gh issue view {number} --json number,title,body,labels,comments
 
 Extract:
-- Parent issue number from `Parent issue: #N` in body
+- Parent issue number from GitHub's native sub-issue relation if needed:
+
+    gh api repos/{owner}/{repo}/issues/{number}/parent --jq '.number'
+
 - Implementation plan (approach, affected components, concrete steps)
 - Acceptance criteria
 

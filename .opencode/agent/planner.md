@@ -33,8 +33,6 @@ Regardless of what the `type/user` issue says, you MUST:
 Each `type/task` issue you create MUST follow this body structure:
 
 ```
-Parent issue: #N
-
 ## Context
 Brief description of which part of the parent feature this task covers.
 
@@ -63,9 +61,10 @@ Write one `gh-artifacts/tasks/{parent_number}-{n}-{slug}.md` file per sub-task:
 
 - **Line 1**: `title: {concise task title}` — used verbatim as the GitHub issue title
 - **Line 2**: blank
-- **Lines 3+**: full issue body (using the Sub-issue Format above, starting with `Parent issue: #N`)
+- **Lines 3+**: full issue body (using the Sub-issue Format above)
 
 File naming: `{parent_number}-{n}-{slug}.md` where slug is kebab-case (e.g. `add-unit-tests`).
+The verify step uses `{parent_number}` from the filename to attach the GitHub sub-issue relation.
 
 Do NOT use `gh issue create` or any `gh` commands — the verify step reads these files and
 creates all GitHub issues atomically. Write at least one file; if none are written the verify

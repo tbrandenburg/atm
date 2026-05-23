@@ -69,14 +69,20 @@ jobs:
             ISSUE_NUMBER=${{ inputs.issue_number }}
           fi
 
-          # Check if sub-tasks already exist referencing this parent
-          EXISTING=$(gh issue list \
-            --repo "$REPO" \
-            --label "type/task" \
-            --state all \
-            --limit 500 \
-            --json number,body \
-            --jq "[.[] | select(.body | test(\"Parent issue: #${ISSUE_NUMBER}([^0-9]|$)\"))] | length")
+          # Check if GitHub sub-issues already exist for this parent. Fall back to
+          # legacy body references so old issues are not planned twice.
+          EXISTING=$( (gh api --paginate \
+            "repos/$REPO/issues/$ISSUE_NUMBER/sub_issues?per_page=100" \
+            --jq '.[]' 2>/dev/null || true) | jq -s length)
+          if [ "$EXISTING" = "0" ]; then
+            EXISTING=$(gh issue list \
+              --repo "$REPO" \
+              --label "type/task" \
+              --state all \
+              --limit 500 \
+              --json number,body \
+              --jq "[.[] | select(.body | test(\"Parent issue: #${ISSUE_NUMBER}([^0-9]|$)\"))] | length")
+          fi
           if [ "$EXISTING" != "0" ]; then
             echo "has_candidates=false" >> $GITHUB_OUTPUT
             echo "ℹ️ #$ISSUE_NUMBER already has $EXISTING type/task sub-issue(s) — skipping." >> $GITHUB_STEP_SUMMARY
@@ -159,12 +165,19 @@ jobs:
             for f in gh-artifacts/tasks/${ISSUE}-*.md; do
               TITLE=$(head -1 "$f" | sed 's/^title: //')
               BODY=$(tail -n +3 "$f")
-              gh issue create \
-                --repo "$REPO" \
-                --title "$TITLE" \
-                --body "$BODY" \
-                --label "type/task"
-              echo "✅ #$ISSUE — created type/task: $TITLE" >> $GITHUB_STEP_SUMMARY
+              CREATED_ISSUE=$(gh api \
+                --method POST \
+                "repos/$REPO/issues" \
+                -f title="$TITLE" \
+                -f body="$BODY" \
+                -f labels[]=type/task)
+              TASK_NUMBER=$(echo "$CREATED_ISSUE" | jq -r '.number')
+              TASK_ID=$(echo "$CREATED_ISSUE" | jq -r '.id')
+              gh api \
+                --method POST \
+                "repos/$REPO/issues/$ISSUE/sub_issues" \
+                -F sub_issue_id="$TASK_ID" >/dev/null
+              echo "✅ #$ISSUE — created type/task #$TASK_NUMBER: $TITLE" >> $GITHUB_STEP_SUMMARY
               CREATED=$((CREATED + 1))
             done
             shopt -u nullglob
