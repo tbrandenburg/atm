@@ -61,17 +61,17 @@ Here is the agentic-task-machine sandbox:
 <table>
   <tr>
     <td>🌤️</td>
-    <td>🌧️</td>
+    <td>📝</td>
     <td>✅</td>
   </tr>
   <tr>
-    <td>🌨️</td>
+    <td>🔬</td>
     <td>🌪️</td>
-    <td>🌊</td>
+    <td>📋</td>
   </tr>
   <tr>
     <td>🔥</td>
     <td>❄️</td>
-    <td>🌈</td>
+    <td>🏆</td>
   </tr>
 </table>
