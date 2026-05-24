@@ -13,7 +13,7 @@ BASE_URL = https://raw.githubusercontent.com/$(SOURCE_REPO)/$(SOURCE_BRANCH)
 REPO ?= $(shell gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)
 
 ATM_FILES = \
-	.github/workflows/core-opencode-run.yml:OpenCode_runner_workflow \
+	.github/workflows/core-agent-run.yml:Agent_runner_workflow \
 	.github/workflows/core-state-heal.yml:State_healing_workflow \
 	.github/workflows/sm-user.yml:User_issue_state_machine \
 	.github/workflows/sm-task.yml:Task_issue_state_machine \
@@ -25,7 +25,7 @@ ATM_FILES = \
 	.github/skills/agentic-workflow-system/references/AGENTIC_WORKFLOW_SYSTEM.md:Skill_reference \
 	.github/skills/agentic-workflow-system/assets/examples/agent-workflow-template.yml:Agent_workflow_template \
 	.github/skills/agentic-workflow-system/assets/examples/config.yml:Example_config \
-	.github/skills/agentic-workflow-system/assets/examples/core-opencode-run.yml:OpenCode_runner_template \
+	.github/skills/agentic-workflow-system/assets/examples/core-agent-run.yml:Agent_runner_template \
 	.github/skills/agentic-workflow-system/assets/examples/core-state-heal.yml:State_heal_template \
 	.github/skills/agentic-workflow-system/assets/examples/sm-workflow-template.yml:State_machine_template \
 	.github/skills/agentic-workflow-system/assets/examples/agents/agent-template.md:Agent_template \

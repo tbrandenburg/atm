@@ -1,4 +1,4 @@
-name: Core - Reusable OpenCode Run
+name: Core - Reusable Agent Run
 
 on:
   workflow_call:
@@ -34,36 +34,11 @@ on:
         description: 'Command to use for OpenCode run (alternative to prompt/prompt-file)'
         required: false
         type: string
-      git-user-name:
-        description: 'Optional local git user.name for agent-created commits'
-        required: false
-        type: string
-        default: ''
-      git-user-email:
-        description: 'Optional local git user.email for agent-created commits'
-        required: false
-        type: string
-        default: ''
       runner:
         description: 'Runner to use for the job'
         required: false
         type: string
         default: 'ubuntu-latest'
-      http-proxy:
-        description: 'Optional HTTP proxy for network operations'
-        required: false
-        type: string
-        default: ''
-      https-proxy:
-        description: 'Optional HTTPS proxy for network operations'
-        required: false
-        type: string
-        default: ''
-      no-proxy:
-        description: 'Optional comma-separated hosts that bypass proxies'
-        required: false
-        type: string
-        default: ''
     outputs:
       results:
         description: 'The output results from OpenCode (truncated if too large)'
@@ -76,6 +51,7 @@ on:
         value: ${{ jobs.run.outputs.artifact-name }}
 
 env:
+  OPENCODE_INSTALL_URL: 'https://opencode.ai/install'
   MAX_OUTPUT_LINES: 50
 
 jobs:
@@ -87,25 +63,20 @@ jobs:
       results-truncated: ${{ steps.process-results.outputs.results-truncated }}
       artifact-name: ${{ steps.process-results.outputs.artifact-name }}
     env:
-      GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
-      HTTP_PROXY: ${{ inputs['http-proxy'] }}
-      HTTPS_PROXY: ${{ inputs['https-proxy'] }}
-      NO_PROXY: ${{ inputs['no-proxy'] }}
-      http_proxy: ${{ inputs['http-proxy'] }}
-      https_proxy: ${{ inputs['https-proxy'] }}
-      no_proxy: ${{ inputs['no-proxy'] }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
 
       - name: Setup and Install OpenCode
         run: |
+          # Add OpenCode to PATH first
+          echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+
           # Check if OpenCode is already installed and working
           if command -v opencode >/dev/null 2>&1 && opencode --version >/dev/null 2>&1; then
             echo "OpenCode is already installed and working"
@@ -116,42 +87,37 @@ jobs:
             echo "System information:"
             echo "OS: $(uname -s)"
             echo "Arch: $(uname -m)"
-            echo "Node.js version: $(node --version)"
-            echo "npm version: $(npm --version)"
+            echo "Install URL: ${{ env.OPENCODE_INSTALL_URL }}"
 
-            if ! npm i -g opencode-ai@latest; then
-              echo "ERROR: OpenCode installation failed"
-              echo "Checking npm global bin directory:"
-              npm bin -g || echo "npm bin -g failed"
-              exit 1
+            if ! curl -fsSL ${{ env.OPENCODE_INSTALL_URL }} | bash; then
+              echo "WARNING: Latest OpenCode installation failed (GitHub API unreachable?). Falling back to pinned version 1.14.40."
+              if ! curl -fsSL ${{ env.OPENCODE_INSTALL_URL }} | bash -s -- --version 1.14.40; then
+                echo "ERROR: Pinned fallback installation also failed"
+                exit 1
+              fi
             fi
 
             echo "OpenCode installation completed"
 
-            if ! opencode --version; then
+            if ! env -i PATH="$HOME/.opencode/bin:$PATH" HOME="$HOME" GH_TOKEN="$GH_TOKEN" opencode --version; then
               echo "ERROR: OpenCode installation verification failed"
-              echo "Checking npm global packages:"
-              npm list -g --depth=0 | grep opencode || echo "opencode-ai not found in global packages"
-              echo "npm global bin directory:"
-              npm bin -g || echo "npm bin -g failed"
+              echo "Checking installation directory:"
+              ls -la "$HOME/.opencode/bin/" || echo "Installation directory not found"
               exit 1
             fi
           fi
 
-      - name: Configure git identity
-        if: inputs['git-user-name'] != '' && inputs['git-user-email'] != ''
-        run: |
-          git config user.name "${{ inputs['git-user-name'] }}"
-          git config user.email "${{ inputs['git-user-email'] }}"
-
       - name: Write prompt to file
-        if: inputs.prompt != ''
+        if: ${{ inputs.prompt != '' }}
         env:
           PROMPT_CONTENT: ${{ inputs.prompt }}
         run: printf '%s' "$PROMPT_CONTENT" > _prompt.txt
 
       - name: Run OpenCode ${{ inputs.run-name }}
+        env:
+          OPENCODE_PATH: "$HOME/.opencode/bin"
         run: |
+          OC="env -i PATH=$HOME/.opencode/bin:$PATH HOME=$HOME GH_TOKEN=$GH_TOKEN opencode"
           CMD="${{ inputs.command }}"
           MODEL="${{ inputs.model }}"
           AGENT="${{ inputs.agent }}"
@@ -167,12 +133,12 @@ jobs:
 
           if [ -n "$CMD" ]; then
             if [ -n "$PROMPT_SRC" ]; then
-              opencode run --command "$CMD" --model "$MODEL" --agent "$AGENT" < "$PROMPT_SRC" > "$OUT"
+              cat "$PROMPT_SRC" | $OC run --command "$CMD" --model "$MODEL" --agent "$AGENT" > "$OUT"
             else
-              opencode run --command "$CMD" --model "$MODEL" --agent "$AGENT" > "$OUT"
+              $OC run --command "$CMD" --model "$MODEL" --agent "$AGENT" > "$OUT"
             fi
           elif [ -n "$PROMPT_SRC" ]; then
-            opencode run --model "$MODEL" --agent "$AGENT" < "$PROMPT_SRC" > "$OUT"
+            cat "$PROMPT_SRC" | $OC run --model "$MODEL" --agent "$AGENT" > "$OUT"
           else
             echo "Error: At least one of 'command', 'prompt', or 'prompt-file' must be provided" >&2
             exit 1
@@ -182,41 +148,21 @@ jobs:
         if: always()
         run: rm -f _prompt.txt
 
-      - name: Collect OpenCode session data
-        if: always()
-        run: |
-          OPENCODE_DIR="$HOME/.local/share/opencode"
-          if [ -d "$OPENCODE_DIR" ]; then
-            mkdir -p gh-artifacts
-            # Zip session data, excluding sensitive credentials and large/unnecessary dirs
-            zip -r gh-artifacts/opencode-session.zip "$OPENCODE_DIR" \
-              --exclude "$OPENCODE_DIR/auth.json" \
-              --exclude "$OPENCODE_DIR/mcp-auth.json" \
-              --exclude "$OPENCODE_DIR/bin/*" \
-              --exclude "$OPENCODE_DIR/repos/*" \
-              || echo "WARNING: zip failed, skipping opencode session data"
-          else
-            echo "OpenCode data directory not found, skipping"
-          fi
-
       - name: Process results for output
         id: process-results
         if: always()
         run: |
           RESULTS_FILE="${{ inputs.run-name }}-results.txt"
-          ARTIFACT_NAME="gh-artifacts-${{ github.run_id }}"
-
-          mkdir -p gh-artifacts
+          ARTIFACT_NAME="${{ inputs.run-name }}-results"
 
           if [ -f "$RESULTS_FILE" ]; then
-            cp "$RESULTS_FILE" gh-artifacts/
             FILE_SIZE=$(wc -c < "$RESULTS_FILE")
             MAX_SIZE=65000
 
-            echo "artifact-name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+            echo "artifact-name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
-            if [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
-              echo "results-truncated=true" >> "$GITHUB_OUTPUT"
+            if [ $FILE_SIZE -gt $MAX_SIZE ]; then
+              echo "results-truncated=true" >> $GITHUB_OUTPUT
 
               {
                 echo "# OpenCode Results (Truncated)"
@@ -227,7 +173,7 @@ jobs:
                 echo ""
                 echo "---"
                 echo ""
-                head -c "$((MAX_SIZE - 1000))" "$RESULTS_FILE"
+                head -c $((MAX_SIZE - 1000)) "$RESULTS_FILE"
                 echo ""
                 echo ""
                 echo "..."
@@ -235,31 +181,24 @@ jobs:
                 echo "**[Full results available in artifact: $ARTIFACT_NAME]**"
               } > truncated-results.txt
 
-              {
-                echo "results<<EOF"
-                cat truncated-results.txt
-                echo "EOF"
-              } >> "$GITHUB_OUTPUT"
+              echo "results<<EOF" >> $GITHUB_OUTPUT
+              cat truncated-results.txt >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
             else
-              {
-                echo "results-truncated=false"
-                echo "results<<EOF"
-                cat "$RESULTS_FILE"
-                echo "EOF"
-              } >> "$GITHUB_OUTPUT"
+              echo "results-truncated=false" >> $GITHUB_OUTPUT
+              echo "results<<EOF" >> $GITHUB_OUTPUT
+              cat "$RESULTS_FILE" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
             fi
           else
-            {
-              echo "results-truncated=false"
-              echo "results=❌ No results file generated"
-              echo "artifact-name=$ARTIFACT_NAME"
-            } >> "$GITHUB_OUTPUT"
+            echo "results-truncated=false" >> $GITHUB_OUTPUT
+            echo "results=❌ No results file generated" >> $GITHUB_OUTPUT
+            echo "artifact-name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
           fi
 
-      - name: Upload gh-artifacts
+      - name: Upload ${{ inputs.run-name }} Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gh-artifacts-${{ github.run_id }}
-          path: gh-artifacts/
-          if-no-files-found: ignore
+          name: ${{ inputs.run-name }}-results
+          path: ${{ inputs.run-name }}-results.txt

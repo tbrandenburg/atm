@@ -20,7 +20,7 @@ Files to read **before implementing**. Understand each before touching any file.
 
 | File | Why |
 |---|---|
-| `.github/skills/agentic-workflow-system/assets/examples/core-opencode-run.yml` | Copy verbatim as-is |
+| `.github/skills/agentic-workflow-system/assets/examples/core-agent-run.yml` | Copy verbatim as-is |
 | `.github/skills/agentic-workflow-system/assets/examples/core-state-heal.yml` | Template — adapt state list to `blocked` only |
 | `.github/skills/agentic-workflow-system/assets/examples/sm-workflow-template.yml` | Template for `sm-user.yml` and `sm-task.yml` |
 | `.github/skills/agentic-workflow-system/assets/examples/agent-workflow-template.yml` | Template for `agent-integrator.yml` and `agent-quality.yml` |
@@ -57,7 +57,7 @@ separately. Any issue opened without it is definitively human-created.
 
 | File | Purpose |
 |------|---------|
-| `.github/workflows/core-opencode-run.yml` | Reusable LLM runner — copy verbatim |
+| `.github/workflows/core-agent-run.yml` | Reusable LLM runner — copy verbatim |
 | `.github/workflows/core-state-heal.yml` | State exclusivity enforcer (`blocked` only) |
 | `.github/config/config.yml` | Model and WIP config |
 | `.github/workflows/sm-user.yml` | Planner agent — processes `type/user` issues |
@@ -111,11 +111,11 @@ _None — this is a new system._
 
 Execute in order. Each task is atomic and independently verifiable.
 
-### CREATE `.github/workflows/core-opencode-run.yml`
+### CREATE `.github/workflows/core-agent-run.yml`
 
-- **SOURCE**: `.github/skills/agentic-workflow-system/assets/examples/core-opencode-run.yml`
+- **SOURCE**: `.github/skills/agentic-workflow-system/assets/examples/core-agent-run.yml`
 - **ACTION**: Copy verbatim — no changes required
-- **VALIDATE**: `actionlint -shellcheck= .github/workflows/core-opencode-run.yml`
+- **VALIDATE**: `actionlint -shellcheck= .github/workflows/core-agent-run.yml`
 
 ### CREATE `.github/workflows/core-state-heal.yml`
 

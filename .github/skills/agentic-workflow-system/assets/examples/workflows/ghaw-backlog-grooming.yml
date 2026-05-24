@@ -66,7 +66,7 @@ jobs:
   run:
     needs: prepare
     if: needs.prepare.outputs.has_issues == 'true'
-    uses: ./.github/workflows/core-opencode-run.yml
+    uses: ./.github/workflows/core-agent-run.yml
     with:
       run-name: backlog-groomer
       command:  ghaw-groom-issue

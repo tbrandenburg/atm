@@ -86,7 +86,7 @@ jobs:
   run:
     needs: prepare
     if: needs.prepare.outputs.has_failing == 'true'
-    uses: ./.github/workflows/core-opencode-run.yml
+    uses: ./.github/workflows/core-agent-run.yml
     with:
       run-name: cicd-agent
       command:  ghaw-resolve-ci-errors

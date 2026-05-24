@@ -286,7 +286,7 @@ Output the plan as a structured list:
 | File | Purpose |
 |------|---------|
 | .github/workflows/core-state-heal.yml | State exclusivity enforcer (required in every repo) |
-| .github/workflows/core-opencode-run.yml | Reusable LLM runner |
+| .github/workflows/core-agent-run.yml | Reusable LLM runner |
 | .github/workflows/sm-[state].yml | [One row per state] |
 | .github/config/config.yml | Model and WIP config |
 | .opencode/agent/[name].md | [One row per agent] |
@@ -337,7 +337,7 @@ if any MUST item is violated.**
 - [ ] `core-state-heal.yml` includes ALL state labels in both `fromJSON([...])` and
       `STATE_LABELS` and the `--argjson states` passed to `jq` (three places, all in sync)
 - [ ] Every `sm-[state].yml` has exactly three jobs: `prepare`, `run`, `verify`
-- [ ] Every `run` job uses `uses: ./.github/workflows/core-opencode-run.yml`
+- [ ] Every `run` job uses `uses: ./.github/workflows/core-agent-run.yml`
 - [ ] Every `run` and `verify` job is gated on `needs.prepare.outputs.has_candidates == 'true'`
 - [ ] Every `verify` job declares `needs: [prepare, run]`
 - [ ] Every `verify` job re-reads from the GitHub API (not from in-memory variables)
@@ -379,9 +379,9 @@ Work through the plan file by file in this order:
 
 **If creating from scratch:**
 
-1. Copy `core-opencode-run.yml` verbatim from
-   [`assets/examples/core-opencode-run.yml`](./assets/examples/core-opencode-run.yml)
-   to `.github/workflows/core-opencode-run.yml` — this file requires no adaptation.
+1. Copy `core-agent-run.yml` verbatim from
+   [`assets/examples/core-agent-run.yml`](./assets/examples/core-agent-run.yml)
+   to `.github/workflows/core-agent-run.yml` — this file requires no adaptation.
 
 2. Create `core-state-heal.yml` using
    [`assets/examples/core-state-heal.yml`](./assets/examples/core-state-heal.yml)
@@ -613,7 +613,7 @@ After creating all files, run the structural validation checks from
 ### Structural Checks
 ```bash
 # Core files must exist
-[ -f .github/workflows/core-opencode-run.yml ] || echo "FAIL: missing core-opencode-run.yml"
+[ -f .github/workflows/core-agent-run.yml ] || echo "FAIL: missing core-agent-run.yml"
 [ -f .github/workflows/core-state-heal.yml ]   || echo "FAIL: missing core-state-heal.yml"
 [ -f .github/config/config.yml ]               || echo "FAIL: missing config.yml"
 
@@ -628,10 +628,10 @@ for f in .github/workflows/sm-*.yml; do
   grep -q "^  verify:"  "$f" || echo "FAIL: $f missing verify job"
 done
 
-# Every sm- run job must call core-opencode-run.yml
+# Every sm- run job must call core-agent-run.yml
 for f in .github/workflows/sm-*.yml; do
-  grep -q "uses: ./.github/workflows/core-opencode-run.yml" "$f" \
-    || echo "FAIL: $f run job does not use core-opencode-run.yml"
+  grep -q "uses: ./.github/workflows/core-agent-run.yml" "$f" \
+    || echo "FAIL: $f run job does not use core-agent-run.yml"
 done
 
 # run and verify must be gated on has_candidates
@@ -722,7 +722,7 @@ After all checks pass, confirm:
 |------|-------------|
 | [`references/AGENTIC_WORKFLOW_SYSTEM.md`](./references/AGENTIC_WORKFLOW_SYSTEM.md) | Authoritative architecture reference — read before every session |
 | [`assets/examples/core-state-heal.yml`](./assets/examples/core-state-heal.yml) | Real `core-state-heal.yml` from GHAW sandbox |
-| [`assets/examples/core-opencode-run.yml`](./assets/examples/core-opencode-run.yml) | Real `core-opencode-run.yml` from GHAW sandbox |
+| [`assets/examples/core-agent-run.yml`](./assets/examples/core-agent-run.yml) | Real `core-agent-run.yml` from GHAW sandbox |
 | [`assets/examples/sm-workflow-template.yml`](./assets/examples/sm-workflow-template.yml) | Generic three-phase sm- workflow template |
 | [`assets/examples/agent-workflow-template.yml`](./assets/examples/agent-workflow-template.yml) | Generic stateless agent workflow template |
 | [`assets/examples/workflows/`](./assets/examples/workflows/) | Full GHAW workflow examples |

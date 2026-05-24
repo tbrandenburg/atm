@@ -50,7 +50,7 @@ Agents act via `gh` CLI and `git`. They signal intent through structured comment
 │  core-state-heal.yml    fires on every issues: labeled event        │
 │  sm-[state].yml         one workflow per state label                │
 │  agent-[name].yml       stateless agents (no required state)        │
-│  core-opencode-run.yml  reusable LLM runner (called by all above)  │
+│  core-agent-run.yml     reusable LLM runner (called by all above)  │
 │                                                                     │
 │  OpenCode agent files                                               │
 │  ───────────────────────────────────────────────────────────────   │
@@ -75,7 +75,7 @@ Agents act via `gh` CLI and `git`. They signal intent through structured comment
 
 | Pattern | Purpose | Example |
 |---|---|---|
-| `core-[name].yml` | Reusable workflows, called by others | `core-opencode-run.yml`, `core-state-heal.yml` |
+| `core-[name].yml` | Reusable workflows, called by others | `core-agent-run.yml`, `core-state-heal.yml` |
 | `sm-[state].yml` | State-owned workflow — one per state label | `sm-open.yml`, `sm-in-progress.yml` |
 | `agent-[name].yml` | Stateless agent — no required state label | `agent-cicd.yml` |
 
@@ -167,7 +167,7 @@ jobs:
 
 All three must stay in sync or the healer will silently skip the new state.
 
-### `core-opencode-run.yml`
+### `core-agent-run.yml`
 
 The reusable LLM runner called by every `sm-*.yml` and `agent-*.yml` via `uses:`. See [AGENTIC_WORKFLOW_SYSTEM_GHAW.md](AGENTIC_WORKFLOW_SYSTEM_GHAW.md) for the full verbatim source — it requires no adaptation and should be copied as-is.
 
@@ -241,12 +241,12 @@ Any state can transition to `blocked` on agent failure. The groomer can also tra
 
 ### Minimum viable state machine
 
-A working system needs only three files beyond `core-opencode-run.yml`:
+A working system needs only three files beyond `core-agent-run.yml`:
 
 ```
 core-state-heal.yml          # always required
 sm-[your-entry-state].yml    # at least one state workflow
-core-opencode-run.yml        # the LLM runner
+core-agent-run.yml           # the LLM runner
 ```
 
 Add more `sm-*.yml` files as your process grows.
@@ -362,7 +362,7 @@ jobs:
 run:
   needs: prepare
   if: needs.prepare.outputs.has_candidates == 'true'
-  uses: ./.github/workflows/core-opencode-run.yml
+  uses: ./.github/workflows/core-agent-run.yml
   with:
     run-name:        my-state-agent
     command:         my-command        # maps to .opencode/commands/my-command.md
@@ -495,7 +495,7 @@ If failure:
       [reason]"
 ```
 
-`$ARGUMENTS` is replaced by OpenCode with the `prompt` input from `core-opencode-run.yml`.
+`$ARGUMENTS` is replaced by OpenCode with the `prompt` input from `core-agent-run.yml`.
 
 ---
 
@@ -698,7 +698,7 @@ jobs:
   run:
     needs: prepare
     if: needs.prepare.outputs.has_candidates == 'true'
-    uses: ./.github/workflows/core-opencode-run.yml
+    uses: ./.github/workflows/core-agent-run.yml
     with:
       run-name: [name]-agent
       command:  [command-name]
@@ -734,7 +734,7 @@ make lint-actions # ./actionlint -shellcheck= .github/workflows/*.yml
 
 ```bash
 # core files must exist
-[ -f .github/workflows/core-opencode-run.yml ] || echo "FAIL: missing core-opencode-run.yml"
+[ -f .github/workflows/core-agent-run.yml ] || echo "FAIL: missing core-agent-run.yml"
 [ -f .github/workflows/core-state-heal.yml ]   || echo "FAIL: missing core-state-heal.yml"
 [ -f .github/config/config.yml ]               || echo "FAIL: missing config.yml"
 
@@ -749,10 +749,10 @@ for f in .github/workflows/sm-*.yml; do
   grep -q "^  verify:"  "$f" || echo "FAIL: $f missing verify job"
 done
 
-# every sm- run job must call core-opencode-run.yml
+# every sm- run job must call core-agent-run.yml
 for f in .github/workflows/sm-*.yml; do
-  grep -q "uses: ./.github/workflows/core-opencode-run.yml" "$f" \
-    || echo "FAIL: $f run job does not use core-opencode-run.yml"
+  grep -q "uses: ./.github/workflows/core-agent-run.yml" "$f" \
+    || echo "FAIL: $f run job does not use core-agent-run.yml"
 done
 
 # run and verify must be gated on has_candidates
@@ -821,7 +821,7 @@ grep -q "CANNOT-PLAN"  .github/workflows/sm-ready.yml || echo "FAIL: CANNOT-PLAN
 | Component | Does |
 |---|---|
 | `core-state-heal.yml` | Fires on every label event; removes duplicate state labels |
-| `core-opencode-run.yml` | Installs OpenCode, runs the agent, saves output as artifact |
+| `core-agent-run.yml` | Installs OpenCode, runs the agent, saves output as artifact |
 | `sm-[state].yml` | Owns one state: prepares context, runs agent, verifies and transitions |
 | `agent-[name].yml` | Stateless: detects work, runs agent, optionally verifies |
 | `.opencode/agent/*.md` | Defines agent persona, principles, and output contract |

@@ -93,7 +93,7 @@ jobs:
   run:
     needs: prepare
     if: needs.prepare.outputs.needs_plan == 'true'
-    uses: ./.github/workflows/core-opencode-run.yml
+    uses: ./.github/workflows/core-agent-run.yml
     with:
       run-name: planner
       command:  ghaw-plan-issue
