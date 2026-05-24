@@ -72,6 +72,6 @@ Here is the agentic-task-machine sandbox:
   <tr>
     <td>🔥</td>
     <td>❄️</td>
-    <td>🌈</td>
+    <td>🏆</td>
   </tr>
 </table>
