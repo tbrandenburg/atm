@@ -66,7 +66,7 @@ Here is the agentic-task-machine sandbox:
   </tr>
   <tr>
     <td>🔬</td>
-    <td>🌪️</td>
+    <td>📊</td>
     <td>📋</td>
   </tr>
   <tr>
