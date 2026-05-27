@@ -2,6 +2,7 @@ defaults:
   model: opencode/big-pickle
   runner: ubuntu-latest
   timeout_minutes: 120
+  cli: opencode
   proxy:
     http: ""
     https: ""
@@ -14,15 +15,19 @@ agents:
     model: opencode/big-pickle
     runner: ubuntu-latest
     timeout_minutes: 60
+    cli: opencode
   worker:
     model: opencode/big-pickle
     runner: ubuntu-latest
     timeout_minutes: 120
+    cli: opencode
   quality:
     model: opencode/big-pickle
     runner: ubuntu-latest
     timeout_minutes: 60
+    cli: opencode
   integrator:
     model: opencode/big-pickle
     runner: ubuntu-latest
     timeout_minutes: 60
+    cli: opencode

@@ -44,6 +44,11 @@ on:
         required: false
         type: string
         default: ''
+      cli:
+        description: 'Agent CLI to use for the run (e.g. opencode)'
+        required: false
+        type: string
+        default: 'opencode'
       runner:
         description: 'Runner to use for the job'
         required: false
@@ -101,39 +106,47 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Setup and Install OpenCode
+      - name: Setup and Install Agent CLI
         run: |
-          # Check if OpenCode is already installed and working
-          if command -v opencode >/dev/null 2>&1 && opencode --version >/dev/null 2>&1; then
-            echo "OpenCode is already installed and working"
-            opencode --version
-          else
-            echo "OpenCode not found or not working, installing..."
+          CLI="${{ inputs.cli }}"
+          case "$CLI" in
+            opencode)
+              if command -v opencode >/dev/null 2>&1 && opencode --version >/dev/null 2>&1; then
+                echo "OpenCode is already installed and working"
+                opencode --version
+              else
+                echo "OpenCode not found or not working, installing..."
 
-            echo "System information:"
-            echo "OS: $(uname -s)"
-            echo "Arch: $(uname -m)"
-            echo "Node.js version: $(node --version)"
-            echo "npm version: $(npm --version)"
+                echo "System information:"
+                echo "OS: $(uname -s)"
+                echo "Arch: $(uname -m)"
+                echo "Node.js version: $(node --version)"
+                echo "npm version: $(npm --version)"
 
-            if ! npm i -g opencode-ai@latest; then
-              echo "ERROR: OpenCode installation failed"
-              echo "Checking npm global bin directory:"
-              npm bin -g || echo "npm bin -g failed"
+                if ! npm i -g opencode-ai@latest; then
+                  echo "ERROR: OpenCode installation failed"
+                  echo "Checking npm global bin directory:"
+                  npm bin -g || echo "npm bin -g failed"
+                  exit 1
+                fi
+
+                echo "OpenCode installation completed"
+
+                if ! opencode --version; then
+                  echo "ERROR: OpenCode installation verification failed"
+                  echo "Checking npm global packages:"
+                  npm list -g --depth=0 | grep opencode || echo "opencode-ai not found in global packages"
+                  echo "npm global bin directory:"
+                  npm bin -g || echo "npm bin -g failed"
+                  exit 1
+                fi
+              fi
+              ;;
+            *)
+              echo "ERROR: Unknown agent CLI '$CLI'. Valid values: opencode"
               exit 1
-            fi
-
-            echo "OpenCode installation completed"
-
-            if ! opencode --version; then
-              echo "ERROR: OpenCode installation verification failed"
-              echo "Checking npm global packages:"
-              npm list -g --depth=0 | grep opencode || echo "opencode-ai not found in global packages"
-              echo "npm global bin directory:"
-              npm bin -g || echo "npm bin -g failed"
-              exit 1
-            fi
-          fi
+              ;;
+          esac
 
       - name: Configure git identity
         if: inputs['git-user-name'] != '' && inputs['git-user-email'] != ''
@@ -147,8 +160,9 @@ jobs:
           PROMPT_CONTENT: ${{ inputs.prompt }}
         run: printf '%s' "$PROMPT_CONTENT" > _prompt.txt
 
-      - name: Run OpenCode ${{ inputs.run-name }}
+      - name: Run Agent CLI ${{ inputs.run-name }}
         run: |
+          CLI="${{ inputs.cli }}"
           CMD="${{ inputs.command }}"
           MODEL="${{ inputs.model }}"
           AGENT="${{ inputs.agent }}"
@@ -162,18 +176,26 @@ jobs:
             PROMPT_SRC=""
           fi
 
-          if [ -n "$CMD" ]; then
-            if [ -n "$PROMPT_SRC" ]; then
-              opencode run --command "$CMD" --model "$MODEL" --agent "$AGENT" < "$PROMPT_SRC" > "$OUT"
-            else
-              opencode run --command "$CMD" --model "$MODEL" --agent "$AGENT" > "$OUT"
-            fi
-          elif [ -n "$PROMPT_SRC" ]; then
-            opencode run --model "$MODEL" --agent "$AGENT" < "$PROMPT_SRC" > "$OUT"
-          else
-            echo "Error: At least one of 'command', 'prompt', or 'prompt-file' must be provided" >&2
-            exit 1
-          fi
+          case "$CLI" in
+            opencode)
+              if [ -n "$CMD" ]; then
+                if [ -n "$PROMPT_SRC" ]; then
+                  opencode run --command "$CMD" --model "$MODEL" --agent "$AGENT" < "$PROMPT_SRC" > "$OUT"
+                else
+                  opencode run --command "$CMD" --model "$MODEL" --agent "$AGENT" > "$OUT"
+                fi
+              elif [ -n "$PROMPT_SRC" ]; then
+                opencode run --model "$MODEL" --agent "$AGENT" < "$PROMPT_SRC" > "$OUT"
+              else
+                echo "Error: At least one of 'command', 'prompt', or 'prompt-file' must be provided" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "ERROR: Unknown agent CLI '$CLI'. Valid values: opencode"
+              exit 1
+              ;;
+          esac
 
       - name: Cleanup transient prompt file
         if: always()
